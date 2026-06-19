@@ -1,0 +1,15 @@
+neutron-version: 1.0
+project-name: ContestForge
+project-type: full-stack
+service-pattern: hybrid
+cloud: aws
+language: python
+framework: fastapi
+frontend:
+  language: typescript
+  framework: nextjs
+region: tbd
+environments: tbd
+data-stores: tbd
+integrations: tbd
+compliance: none

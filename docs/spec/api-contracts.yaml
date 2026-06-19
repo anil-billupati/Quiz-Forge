@@ -1,0 +1,701 @@
+openapi: 3.0.3
+info:
+  title: ContestForge Core Contest Engine API
+  version: 0.1.0
+  description: >
+    Multi-tenant live contest engine. REST endpoints for tenancy, contest
+    authoring, lifecycle, registration, and results. Live question delivery,
+    answer submission, leaderboard, and elimination events flow over a
+    WebSocket channel (documented in api-contracts.md §WebSocket).
+    All tenant-scoped endpoints require a JWT whose claims include the
+    caller's role and tenant_id; cross-tenant access is rejected.
+
+servers:
+  - url: https://api.contestforge.example/v1
+    description: Placeholder; region/host finalized in /neutron:plan
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Auth
+  - name: Organizations
+  - name: Contests
+  - name: Configuration
+  - name: Questions
+  - name: Lifecycle
+  - name: Registration
+  - name: Results
+
+paths:
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Authenticate and obtain JWT access/refresh tokens
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Authenticated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenPair' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Exchange a refresh token for a new access token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: { type: string }
+      responses:
+        '200':
+          description: Refreshed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenPair' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /organizations:
+    post:
+      tags: [Organizations]
+      summary: Create an organization (tenant). Super Admin only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateOrganizationRequest' }
+      responses:
+        '201':
+          description: Organization created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Organization' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    get:
+      tags: [Organizations]
+      summary: List organizations. Super Admin only.
+      responses:
+        '200':
+          description: Organizations
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Organization' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /organizations/{orgId}/status:
+    patch:
+      tags: [Organizations]
+      summary: Suspend or reactivate an organization. Super Admin only.
+      parameters:
+        - { $ref: '#/components/parameters/OrgId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [ACTIVE, SUSPENDED] }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Organization' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /contests:
+    post:
+      tags: [Contests]
+      summary: Create a contest (Draft). Org Admin.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateContestRequest' }
+      responses:
+        '201':
+          description: Contest created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Contest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    get:
+      tags: [Contests]
+      summary: List contests in the caller's tenant.
+      parameters:
+        - in: query
+          name: status
+          schema: { $ref: '#/components/schemas/LifecycleStatus' }
+      responses:
+        '200':
+          description: Contests
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Contest' }
+
+  /contests/{contestId}:
+    get:
+      tags: [Contests]
+      summary: Get a contest (with config/groups).
+      parameters:
+        - { $ref: '#/components/parameters/ContestId' }
+      responses:
+        '200':
+          description: Contest
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ContestDetail' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Contests]
+      summary: Update contest metadata. Allowed only while editable (Draft).
+      parameters:
+        - { $ref: '#/components/parameters/ContestId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateContestRequest' }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Contest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /contests/{contestId}/groups:
+    post:
+      tags: [Configuration]
+      summary: Add a group to a Grouped contest (Draft only).
+      parameters:
+        - { $ref: '#/components/parameters/ContestId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateGroupRequest' }
+      responses:
+        '201':
+          description: Group created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Group' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /contests/{contestId}/configuration:
+    put:
+      tags: [Configuration]
+      summary: >
+        Set the Configuration Block. For Normal contests target the contest;
+        for Grouped contests provide group_id. Editable until Registration Open.
+      parameters:
+        - { $ref: '#/components/parameters/ContestId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConfigurationBlock' }
+      responses:
+        '200':
+          description: Configuration saved
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigurationBlock' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /contests/{contestId}/questions:
+    post:
+      tags: [Questions]
+      summary: Add a question (Draft only).
+      parameters:
+        - { $ref: '#/components/parameters/ContestId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateQuestionRequest' }
+      responses:
+        '201':
+          description: Question created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Question' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    get:
+      tags: [Questions]
+      summary: List questions for a contest (admin view includes correctness).
+      parameters:
+        - { $ref: '#/components/parameters/ContestId' }
+      responses:
+        '200':
+          description: Questions
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Question' }
+
+  /contests/{contestId}/lifecycle:
+    post:
+      tags: [Lifecycle]
+      summary: Transition the contest to the next lifecycle stage.
+      parameters:
+        - { $ref: '#/components/parameters/ContestId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target_status]
+              properties:
+                target_status: { $ref: '#/components/schemas/LifecycleStatus' }
+                scheduled_start_at:
+                  type: string
+                  format: date-time
+                  description: Required when transitioning to SCHEDULED
+      responses:
+        '200':
+          description: Transitioned
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Contest' }
+        '409':
+          $ref: '#/components/responses/Conflict'
+          description: Illegal transition (stage skipped or preconditions unmet)
+
+  /contests/{contestId}/registrations:
+    post:
+      tags: [Registration]
+      summary: Register the calling participant for a contest (Registration Open).
+      parameters:
+        - { $ref: '#/components/parameters/ContestId' }
+      responses:
+        '201':
+          description: Registered
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Registration' }
+        '409':
+          $ref: '#/components/responses/Conflict'
+          description: Registration not open or already registered
+    get:
+      tags: [Registration]
+      summary: List registrations (Org Admin / Moderator).
+      parameters:
+        - { $ref: '#/components/parameters/ContestId' }
+      responses:
+        '200':
+          description: Registrations
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Registration' }
+
+  /contests/{contestId}/leaderboard:
+    get:
+      tags: [Results]
+      summary: >
+        Get the current leaderboard snapshot. Live pushes happen over
+        WebSocket; this is a REST snapshot/fallback.
+      parameters:
+        - { $ref: '#/components/parameters/ContestId' }
+        - in: query
+          name: view
+          schema: { type: string, enum: [CONTEST, GROUP, SURVIVOR] }
+        - in: query
+          name: group_id
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Leaderboard
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/LeaderboardEntry' }
+
+  /contests/{contestId}/results:
+    get:
+      tags: [Results]
+      summary: Final results and per-participant breakdown (Completed/Archived).
+      parameters:
+        - { $ref: '#/components/parameters/ContestId' }
+      responses:
+        '200':
+          description: Results
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ContestResults' }
+
+  /contests/{contestId}/wildcard-audit:
+    get:
+      tags: [Results]
+      summary: Wildcard activation audit log (Org Admin).
+      parameters:
+        - { $ref: '#/components/parameters/ContestId' }
+      responses:
+        '200':
+          description: Wildcard activations
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/WildcardActivation' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    OrgId:
+      in: path
+      name: orgId
+      required: true
+      schema: { type: string, format: uuid }
+    ContestId:
+      in: path
+      name: contestId
+      required: true
+      schema: { type: string, format: uuid }
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid token
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: Role or tenant not permitted
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Resource not found in caller's tenant
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Conflict:
+      description: Invalid state transition or precondition failure
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string }
+            message: { type: string }
+            details: { type: object, additionalProperties: true }
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, format: password }
+        tenant_slug:
+          type: string
+          description: Optional tenant hint for non-super-admin users
+
+    TokenPair:
+      type: object
+      properties:
+        access_token: { type: string }
+        refresh_token: { type: string }
+        token_type: { type: string, example: bearer }
+        expires_in: { type: integer, example: 900 }
+        role: { type: string, enum: [SUPER_ADMIN, ORG_ADMIN, MODERATOR, PARTICIPANT] }
+
+    Organization:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        status: { type: string, enum: [ACTIVE, SUSPENDED] }
+        created_at: { type: string, format: date-time }
+
+    CreateOrganizationRequest:
+      type: object
+      required: [name, admin_email]
+      properties:
+        name: { type: string }
+        admin_email: { type: string, format: email }
+        admin_display_name: { type: string }
+
+    LifecycleStatus:
+      type: string
+      enum:
+        - DRAFT
+        - PUBLISHED
+        - REGISTRATION_OPEN
+        - REGISTRATION_CLOSED
+        - SCHEDULED
+        - LIVE
+        - COMPLETED
+        - ARCHIVED
+
+    Contest:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string }
+        structure: { type: string, enum: [NORMAL, GROUPED] }
+        lifecycle_status: { $ref: '#/components/schemas/LifecycleStatus' }
+        scheduled_start_at: { type: string, format: date-time, nullable: true }
+        group_score_rollup:
+          type: string
+          enum: [SUM, WEIGHTED_SUM, BEST_N]
+          nullable: true
+        rollup_best_n: { type: integer, nullable: true }
+
+    ContestDetail:
+      allOf:
+        - $ref: '#/components/schemas/Contest'
+        - type: object
+          properties:
+            groups:
+              type: array
+              items: { $ref: '#/components/schemas/Group' }
+            configuration:
+              $ref: '#/components/schemas/ConfigurationBlock'
+
+    CreateContestRequest:
+      type: object
+      required: [name, structure]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        structure: { type: string, enum: [NORMAL, GROUPED] }
+        group_score_rollup: { type: string, enum: [SUM, WEIGHTED_SUM, BEST_N] }
+        rollup_best_n: { type: integer }
+
+    UpdateContestRequest:
+      type: object
+      properties:
+        name: { type: string }
+        description: { type: string }
+
+    CreateGroupRequest:
+      type: object
+      required: [name, sequence]
+      properties:
+        name: { type: string }
+        sequence: { type: integer }
+        weight: { type: number, nullable: true }
+
+    Group:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        contest_id: { type: string, format: uuid }
+        name: { type: string }
+        sequence: { type: integer }
+        weight: { type: number, nullable: true }
+
+    ConfigurationBlock:
+      type: object
+      required: [mode, question_duration_s]
+      properties:
+        group_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Required for Grouped contests; null/omitted for Normal
+        mode: { type: string, enum: [STANDARD, SPEED, ELIMINATION] }
+        question_duration_s: { type: integer, minimum: 5, maximum: 300 }
+        question_interval_s: { type: integer, minimum: 0, maximum: 60 }
+        explanation_duration_s: { type: integer, minimum: 0, maximum: 60 }
+        leaderboard_duration_s: { type: integer, minimum: 0, maximum: 60 }
+        reveal_mode:
+          type: string
+          enum: [AUTOMATIC, MODERATOR_CONTROLLED, SCHEDULED]
+        ranking_criterion:
+          type: string
+          enum: [SCORE_ONLY, SCORE_TIME, ACCURACY]
+        tie_display:
+          type: string
+          enum: [SHARED_RANK, FASTEST, LEAST_INCORRECT]
+        leaderboard_visibility:
+          type: string
+          enum: [ALWAYS, POST_QUESTION, HIDDEN, MASKED]
+        update_frequency:
+          type: string
+          enum: [PER_ANSWER, PER_QUESTION, PER_GROUP]
+        correct_points: { type: integer, default: 10 }
+        wrong_points: { type: integer, default: 0 }
+        second_chance_rate: { type: number, default: 0.5 }
+        time_bands:
+          type: array
+          description: Speed mode scoring bands (overrides defaults)
+          items:
+            type: object
+            properties:
+              max_seconds: { type: number }
+              points: { type: integer }
+        decay:
+          type: object
+          nullable: true
+          description: Optional linear decay alternative to bands (Speed)
+          properties:
+            max_points: { type: integer }
+            floor: { type: integer }
+            decay_rate: { type: number }
+        wildcards:
+          type: array
+          items: { $ref: '#/components/schemas/WildcardConfig' }
+        elimination_rules:
+          type: array
+          description: Required when mode = ELIMINATION
+          items: { $ref: '#/components/schemas/EliminationRule' }
+        checkpoints:
+          type: array
+          description: Required when mode = ELIMINATION
+          items: { $ref: '#/components/schemas/Checkpoint' }
+
+    WildcardConfig:
+      type: object
+      properties:
+        type: { type: string, enum: [FIFTY_FIFTY, SECOND_CHANCE, SKIP] }
+        usage_limit: { type: integer }
+        eligibility: { type: string, example: "ALL | TOP_50_PERCENT" }
+        cooldown_questions: { type: integer }
+        carry_over: { type: boolean, description: Grouped only }
+
+    EliminationRule:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [FIRST_WRONG, N_WRONG, BOTTOM_X_PERCENT, MIN_SCORE]
+        n_value: { type: integer, nullable: true }
+        percent_value: { type: number, nullable: true }
+        min_score: { type: integer, nullable: true }
+        combine_operator: { type: string, enum: [AND, OR] }
+
+    Checkpoint:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [AFTER_QUESTION, AFTER_GROUP, CUSTOM_MILESTONE]
+        question_sequence: { type: integer, nullable: true }
+        milestone_at: { type: string, format: date-time, nullable: true }
+
+    CreateQuestionRequest:
+      type: object
+      required: [text, options]
+      properties:
+        group_id: { type: string, format: uuid, nullable: true }
+        sequence: { type: integer }
+        text: { type: string }
+        explanation: { type: string, nullable: true }
+        reveal_at: { type: string, format: date-time, nullable: true }
+        options:
+          type: array
+          minItems: 2
+          items:
+            type: object
+            required: [text, is_correct]
+            properties:
+              text: { type: string }
+              is_correct: { type: boolean }
+              ordinal: { type: integer }
+
+    Question:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        contest_id: { type: string, format: uuid }
+        group_id: { type: string, format: uuid, nullable: true }
+        sequence: { type: integer }
+        text: { type: string }
+        explanation: { type: string, nullable: true }
+        options:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string, format: uuid }
+              text: { type: string }
+              is_correct: { type: boolean }
+              ordinal: { type: integer }
+
+    Registration:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        contest_id: { type: string, format: uuid }
+        participant_id: { type: string, format: uuid }
+        status: { type: string, enum: [REGISTERED, ACTIVE, ELIMINATED, COMPLETED] }
+        registered_at: { type: string, format: date-time }
+
+    LeaderboardEntry:
+      type: object
+      properties:
+        participant_id: { type: string, format: uuid }
+        display_name: { type: string }
+        rank: { type: integer }
+        score: { type: integer }
+        total_time_ms: { type: integer }
+        wrong_count: { type: integer }
+
+    ContestResults:
+      type: object
+      properties:
+        contest_id: { type: string, format: uuid }
+        final_leaderboard:
+          type: array
+          items: { $ref: '#/components/schemas/LeaderboardEntry' }
+        participants:
+          type: array
+          items:
+            type: object
+            properties:
+              participant_id: { type: string, format: uuid }
+              score: { type: integer }
+              correct_count: { type: integer }
+              wrong_count: { type: integer }
+              eliminated: { type: boolean }
+              final_rank: { type: integer }
+
+    WildcardActivation:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        participant_id: { type: string, format: uuid }
+        question_id: { type: string, format: uuid }
+        type: { type: string, enum: [FIFTY_FIFTY, SECOND_CHANCE, SKIP] }
+        activated_at: { type: string, format: date-time }
+        outcome: { type: string }
