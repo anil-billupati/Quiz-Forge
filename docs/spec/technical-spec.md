@@ -75,9 +75,9 @@ consumers.
 | **Next.js Web App** | All UI: org/super-admin consoles, contest builder, moderator console, participant live view. Renders server timers as display only; never authoritative. |
 | **FastAPI API Service** | HTTP endpoints (orgs, contests, configuration, questions, registration, results); WebSocket gateway (question push, answer submit, leaderboard/elimination events); authentication, JWT issue/verify, RBAC, tenant context resolution. |
 | **Tenant Context** | Resolves `tenant_id` from JWT on every request; injects it into all queries; rejects cross-tenant access. Super Admin operates platform-scoped. |
-| **Execution Engine (worker)** | Authoritative timers, reveal scheduling, submission-window open/close, per-question and per-group progression, moderator overrides. |
-| **Scoring Engine (worker)** | Applies the Mode-derived scoring model (Fixed / Time-Based), Second Chance / Skip adjustments, negative marking, tie-break data capture. At-most-once per accepted answer. |
-| **Leaderboard Engine (worker)** | Maintains Redis sorted sets per view (Contest / Group / Survivor); applies ranking criterion + tie display; pushes updates; rebuildable from Postgres. |
+| **Execution Engine (worker)** | Authoritative timers, reveal scheduling, submission-window open/close, per-question and per-group progression, moderator overrides. Tracks per-participant wildcard usage state (cooldown counters, group carryover/reset) in Redis for the duration of the contest. |
+| **Scoring Engine (worker)** | Applies the Mode-derived scoring model (Fixed / Time-Based with configurable bands or linear decay), Second Chance / Skip adjustments, negative marking (value configured per Configuration Block), and tie-break data capture (`total_response_time_ms`, `wrong_answer_count`, `last_correct_submission_at`). Computes group-score rollup (Sum, Weighted Sum, Best N Groups). At-most-once per accepted answer. |
+| **Leaderboard Engine (worker)** | Maintains Redis sorted sets per view (Contest / Group / Survivor); applies ranking criterion (Score Only, Score + Time, Accuracy) with the criterion-specific tie-break sequence from FR-30, plus tie display mode; pushes updates; rebuildable from Postgres. In Masked visibility mode the fan-out layer redacts all entries except the requesting participant's before pushing. |
 | **Elimination Engine (worker)** | Evaluates elimination rules at checkpoints, computes eliminated/survivor sets, locks survivor list, emits notifications. |
 | **PostgreSQL** | Authoritative system of record for all tenant data and accepted answers (durability source of truth). |
 | **Redis** | Leaderboard ZSETs, WebSocket pub/sub fan-out, presence, and idempotency/dedupe keys. Treated as rebuildable cache, never as sole source of truth. |
@@ -92,7 +92,9 @@ consumers.
    **server-side** close time (FR-20), participant not eliminated.
 3. API records the answer **durably in PostgreSQL** with the server-accept
    timestamp and an idempotency key `(contest_id, question_id, participant_id,
-   attempt_no)`. This write is the durability boundary (FR-38, FR-40).
+   attempt_no)`. `attempt_no` starts at 1 for the first submission and
+   increments for each Second-Chance retry. This write is the durability
+   boundary (FR-38, FR-40).
 4. API returns an acknowledgement (accepted/rejected) to the participant
    (FR-41).
 5. A scoring command is published to the engine channel referencing the
@@ -105,8 +107,7 @@ consumers.
 
 ### 3.2 Question reveal
 1. Execution Engine determines reveal time per Reveal Mode (Automatic =
-   schedule; Scheduled = per-question timestamp; Moderator-Controlled = on
-   moderator trigger).
+   schedule; Moderator-Controlled = on moderator trigger).
 2. At reveal, it publishes the question payload to the contest's Redis pub/sub
    channel; the API fans out to all WS connections within 200ms (NFR-1).
 3. The submission window opens; the server-side close time is recorded.
@@ -114,11 +115,13 @@ consumers.
 ### 3.3 Elimination checkpoint
 1. Execution Engine reaches a configured checkpoint and signals the Elimination
    Engine.
-2. Elimination Engine evaluates the rule set (AND/OR) against authoritative
-   scores, computes the eliminated set, persists it, locks the survivor list,
-   and emits notifications.
-3. Leaderboard Engine refreshes the Survivor Leaderboard; Execution Engine
-   proceeds.
+2. Elimination Engine evaluates the rule set against authoritative scores.
+   Rules are combined with a single top-level operator (AND | OR) configured
+   in the block; all enabled rules participate. It computes the eliminated set,
+   persists it, locks the survivor list, and emits notifications.
+3. Leaderboard Engine refreshes the Survivor Leaderboard.
+4. Execution Engine pauses to display the group leaderboard and announce
+   eliminations before applying the next group's Configuration Block (FR-21).
 
 ### 3.4 Recovery
 1. On restart, workers reload contest state from PostgreSQL (FR-42).
@@ -141,6 +144,7 @@ consumers.
 | Multi-tenancy (spec assumption) | Shared schema + `tenant_id`, row-level enforcement | Lowest ops overhead, scales to many tenants; isolation enforced in the data-access layer and verified by tests. Final infra confirmed in /neutron:plan. |
 | Auth | JWT (access + refresh), email/password | Stateless, scales horizontally; carries role + tenant scope. |
 | Cloud | AWS | From kickoff. |
+| Super Admin bootstrap | Deployment-time seed (env var or migration) | The first Super Admin is created outside the tenant API; subsequent Super Admins can only be created by an existing Super Admin. |
 
 ---
 
@@ -162,9 +166,11 @@ consumers.
 - **Engine failures:** commands are consumed idempotently; transient failures
   are retried with backoff; poison messages are dead-lettered for inspection
   without blocking the contest.
-- **WebSocket drops:** treated as transient; on reconnect the client
-  re-subscribes and the server restores state and the open submission window
-  (FR-43).
+- **WebSocket drops / network faults:** treated as transient; on reconnect the
+  client re-subscribes and the server restores state and the open submission
+  window within 3 seconds (FR-43, NFR-7). Transient network faults must not
+  lose answers or advance the contest incorrectly; affected participants are
+  notified.
 - **5xx:** unexpected errors return a generic message with a correlation ID;
   full detail is logged server-side only.
 
@@ -216,9 +222,11 @@ Detail lives in `.neutron/security.md`; high-level here:
 - Multi-tenancy is foundational; the shared-schema + `tenant_id` model is the
   spec's working assumption pending /neutron:plan confirmation.
 - Questions are multiple-choice in this engine version.
-- Data is retained indefinitely; Archived contests are read-only (FR-45).
+- Data is retained indefinitely; Archived contests are read-only (FR-45). Archival is a state transition enforced at the API and RBAC layers; no data migration occurs on archive.
 - A durable, at-least-once command channel with idempotent consumers is assumed
   between API and engine workers (concrete technology TBD in /neutron:plan).
+- Custom Milestone checkpoints are evaluated by the Execution Engine against
+  an admin-defined absolute timestamp or event trigger.
 - Compliance recorded as "none" (open question).
 
 ---
