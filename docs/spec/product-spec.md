@@ -95,7 +95,9 @@ Numbered for traceability. **FR-#**.
   (access + refresh). Tokens carry the user's role and tenant scope (except
   Super Admin, which is platform-scoped).
 - **FR-5** Roles are: Super Admin, Org Admin, Moderator, Participant. Role
-  governs which operations and tenants are accessible.
+  governs which operations and tenants are accessible. The first Super Admin
+  account is bootstrapped at deployment and is not created through the tenant
+  API.
 
 ### Contest Model & Lifecycle
 - **FR-6** A contest is created with exactly one Structure (Normal | Grouped),
@@ -138,7 +140,7 @@ Numbered for traceability. **FR-#**.
 - **FR-18** Per-question flow: Display → Timer → Submission → Evaluation →
   Explanation → Leaderboard → Interval → Next, with durations from the active
   Configuration Block.
-- **FR-19** Reveal Mode ∈ {Automatic, Moderator-Controlled, Scheduled},
+- **FR-19** Reveal Mode ∈ {Automatic, Moderator-Controlled},
   independent of Contest Mode, configured per quiz/group.
 - **FR-20** Answers submitted after the server-side close time are rejected
   regardless of client clock.
@@ -155,10 +157,12 @@ Numbered for traceability. **FR-#**.
 - **FR-24** Second Chance allows one more attempt after a wrong answer at
   reduced points (default 50%).
 - **FR-25** Skip Question awards full points without showing/attempting it: in
-  Fixed scoring, the full correct value; in Speed, the floor score.
+  Fixed scoring, the full correct value; in Speed, the floor score (the minimum
+  score for a correct answer; distinct from timeout, which awards 0).
 - **FR-26** Wildcard usage respects per-block configuration: enabled set, usage
-  limit per participant per quiz/group, eligibility, group carryover/reset
-  (Grouped), and cooldown (minimum questions between same-wildcard uses).
+  limit per participant per quiz/group, eligibility (e.g., all participants or
+  top 50% by score), group carryover/reset (Grouped), and cooldown (minimum
+  questions between same-wildcard uses).
 - **FR-27** Every wildcard activation is logged (participant ID, type, question
   number, timestamp, outcome) and included in result exports.
 
@@ -168,8 +172,14 @@ Numbered for traceability. **FR-#**.
 - **FR-29** Views: Contest Leaderboard (all contests), Group Leaderboard
   (Grouped; resets at group start), Survivor Leaderboard (Elimination; updates
   per checkpoint).
-- **FR-30** Ranking criterion is configurable per block: Score Only, Score +
-  Time, or Accuracy — each with the defined tie-break sequence.
+- **FR-30** Ranking criterion is configurable per block:
+  - **Score Only:** highest score first; tie-break uses the full FR-15 sequence
+    (fastest total completion time, fewest wrong answers, earliest last correct
+    submission).
+  - **Score + Time:** score first, then shortest total completion time;
+    tie-break uses fewest wrong answers, then earliest last correct submission.
+  - **Accuracy:** highest correct percentage first; tie-break uses score, then
+    fastest total completion time.
 - **FR-31** Update frequency is configurable: after every answer (≤500
   participants), after every question (default), or after every group (>5,000
   participants).
@@ -205,7 +215,9 @@ Numbered for traceability. **FR-#**.
 - **FR-42** Contest state and recorded answers are reconstructible from
   authoritative storage at any point.
 - **FR-43** On participant disconnect/reconnect, state is restored and the
-  submission window honoured as it stood at disconnect.
+  submission window honoured as it stood at disconnect. Transient network
+  faults must not lose answers or advance the contest incorrectly; affected
+  participants are notified.
 - **FR-44** A cache loss must not change any participant's score or rank;
   rankings are recoverable from authoritative data.
 
