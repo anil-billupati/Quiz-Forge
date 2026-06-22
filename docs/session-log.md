@@ -88,3 +88,44 @@
 ### Open questions remaining
 - Compliance confirmation ; timeline ; budget ; notification transport
   (in-app vs. email) ; default negative-marking policy per tenant.
+
+---
+
+## 2026-06-22 — Domain model: tenant URL, user names & schema gap-fill
+
+**Trigger:** User (acting as product owner) request, executed via plan mode.
+
+### Artifacts read
+- `ContestForge_PRD_v1.md`, `docs/spec/domain-model.md`, and the user-edited
+  `docs/spec/product-spec.md` / `docs/spec/technical-spec.md`.
+
+### Questions asked & answers
+1. Meaning of "URL for the schema" on the tenant table → **Tenant
+   subdomain/portal URL** (not per-tenant DB schema, not JSON-schema URL).
+2. Deliverable scope → **Update `docs/spec/domain-model.md` only** (DDL deferred
+   to /neutron:init).
+
+### Decisions / changes (domain-model.md only)
+- **Organization:** added `slug`, `portal_url` (both unique, not null) and
+  optional `custom_domain`.
+- **User:** replaced `display_name` with `first_name` + `last_name`; made
+  `(tenant_id, email)` composite-unique explicit.
+- **New entities (gap-fill):** RefreshToken (FR-4), WildcardConfig (FR-26),
+  ContestExecutionState (FR-42/NFR-6), QuestionWindow (FR-20/40), OutboxEvent
+  (durable at-least-once channel), Notification (FR-37/41), AuditLog (tech-spec
+  §6). Now five bounded contexts.
+- **Modified entities:** ConfigurationBlock (+`survivor_score_reset`,
+  +`elimination_combine_operator`, dropped SCHEDULED reveal mode);
+  EliminationRule (combine_operator moved to block); Question (dropped
+  `reveal_at`); Registration (+`joined_at`, `spectator_access`, `final_rank`,
+  `final_score`); AnswerSubmission (+`question_window_id`).
+- **Consistency alignment** with user's spec edits: reveal modes now
+  `AUTOMATIC | MODERATOR_CONTROLLED`; elimination combine operator is
+  block-level.
+- Added **§5 Scale & Indexing** (UUID v7, key indexes, hash partitioning of
+  answer_submission/score, RLS note) for the 10,000-concurrent-user target.
+- ERD refreshed; business rules BR-19..BR-24 added; BR-4 updated.
+
+### Outputs produced
+- `docs/spec/domain-model.md` (updated)
+- `docs/session-log.md` (this entry)
