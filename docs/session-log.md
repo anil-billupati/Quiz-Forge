@@ -129,3 +129,43 @@
 ### Outputs produced
 - `docs/spec/domain-model.md` (updated)
 - `docs/session-log.md` (this entry)
+
+---
+
+## 2026-06-22 — API contracts completion (spec only, no implementation)
+
+**Trigger:** User request (professional API developer hat, Python/FastAPI),
+executed via plan mode. Scope explicitly limited to **API contracts only**.
+
+### Artifacts read
+- `ContestForge_PRD_v1.md`, all `docs/spec/*`, prior `api-contracts.yaml`.
+
+### Question asked & answer
+- Participant onboarding model → **Admin-managed, no self-signup.** SQL
+  bootstraps the Super Admin (not in API); Super Admin creates the org + initial
+  Org Admin; Org Admin creates co-Org-Admins, Moderators, Participants via
+  `POST /users` (role ≠ SUPER_ADMIN).
+
+### Work done
+- Rewrote `docs/spec/api-contracts.yaml` to OpenAPI 3.0.3 v1.0.0: **35 path
+  items, 30 schemas**, covering Auth/session, Users, Organizations, Contests,
+  Groups, Configuration, Questions/Options, Registration, Live runtime
+  (reconnect snapshot + moderator controls), Results/Leaderboards/Eliminations/
+  export, Notifications, Audit, and Ops (health/ready).
+- Aligned schemas with current specs: reveal modes `AUTOMATIC |
+  MODERATOR_CONTROLLED` (no SCHEDULED); block-level `elimination_combine_operator`;
+  `survivor_score_reset`; structured `wildcards`; org `slug`/`portal_url`; user
+  `first_name`/`last_name`. Added pagination envelope, standard error model,
+  reusable params/responses.
+- Rewrote `docs/spec/api-contracts.md` companion: per-resource tables, request
+  examples, conventions, the WebSocket live-channel contract, and a
+  capability→endpoint traceability matrix.
+
+### Verification
+- YAML parses; **no dangling `$ref`s and no unused components** (checked via
+  script). Deep `openapi-spec-validator` not installed in env (noted).
+
+### Outputs produced
+- `docs/spec/api-contracts.yaml` (rewritten)
+- `docs/spec/api-contracts.md` (rewritten)
+- `docs/session-log.md` (this entry)
