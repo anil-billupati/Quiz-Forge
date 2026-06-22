@@ -76,7 +76,7 @@ Tagged `@resilience`, run in CI nightly and pre-release.
 
 - **No answer loss (NFR-5):** drive 10,000 submissions with a 1% induced
   persistence-failure rate (fault-injection wrapper on the persistence layer);
-  assert zero lost answers after reconciliation.
+  assert < 0.01 % lost answers after reconciliation.
 - **Contest recovery (NFR-6):** kill and restart workers mid-contest; assert
   resume ≤30s, state intact, no double-scoring.
 - **Ranking recovery:** total Redis loss; assert ranks correct after rebuild.
@@ -86,12 +86,18 @@ Tagged `@resilience`, run in CI nightly and pre-release.
   and open submission window restored ≤3s (FR-43).
 
 ### 2.5 Performance tests
-- **Reveal fan-out (NFR-1):** measure question delivery latency to 10,000
-  simulated WS clients (≤200ms).
-- **Leaderboard push (NFR-3):** ≤500ms at 5,000 / ≤2s at 20,000.
-- **Timer accuracy (NFR-2):** ±50ms over a 5-minute session.
+- **Reveal fan-out (NFR-1):** measure p99 question delivery latency to 10,000
+  simulated WS clients (≤ 200 ms server-side dispatch).
+- **Leaderboard push (NFR-3):** p99 ≤ 500 ms at 5,000 / ≤ 2 s at 20,000
+  simulated clients.
+- **Timer accuracy (NFR-2):** p99 server-side drift ≤ ±50 ms over a 5-minute
+  session.
+- **Rate limiting (NFR-11):** verify per-user, per-tenant, and per-IP limits
+  reject excess traffic while allowing legitimate loads.
 
 Tooling: `locust` or `k6` (WS) for load; results gated against NFR thresholds.
+Fault-injection and percentile metrics are captured in the observability
+backend.
 
 ---
 

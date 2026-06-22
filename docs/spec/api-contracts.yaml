@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: ContestForge Core Contest Engine API
-  version: 0.1.0
+  version: 0.2.0
   description: >
     Multi-tenant live contest engine. REST endpoints for tenancy, contest
     authoring, lifecycle, registration, and results. Live question delivery,
@@ -441,14 +441,16 @@ components:
       type: object
       properties:
         id: { type: string, format: uuid }
+        slug: { type: string, pattern: '^[a-z0-9-]{3,64}$' }
         name: { type: string }
         status: { type: string, enum: [ACTIVE, SUSPENDED] }
         created_at: { type: string, format: date-time }
 
     CreateOrganizationRequest:
       type: object
-      required: [name, admin_email]
+      required: [slug, name, admin_email]
       properties:
+        slug: { type: string, pattern: '^[a-z0-9-]{3,64}$' }
         name: { type: string }
         admin_email: { type: string, format: email }
         admin_display_name: { type: string }
@@ -540,7 +542,7 @@ components:
         leaderboard_duration_s: { type: integer, minimum: 0, maximum: 60 }
         reveal_mode:
           type: string
-          enum: [AUTOMATIC, MODERATOR_CONTROLLED, SCHEDULED]
+          enum: [AUTOMATIC, MODERATOR_CONTROLLED]
         ranking_criterion:
           type: string
           enum: [SCORE_ONLY, SCORE_TIME, ACCURACY]
@@ -621,7 +623,6 @@ components:
         sequence: { type: integer }
         text: { type: string }
         explanation: { type: string, nullable: true }
-        reveal_at: { type: string, format: date-time, nullable: true }
         options:
           type: array
           minItems: 2

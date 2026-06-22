@@ -45,8 +45,8 @@ refresh token is invalid/expired.
 
 ```json
 // POST /organizations  (201)
-{ "name": "Acme University", "admin_email": "lead@acme.test",
-  "admin_display_name": "Acme Lead" }
+{ "slug": "acme-university", "name": "Acme University",
+  "admin_email": "lead@acme.test", "admin_display_name": "Acme Lead" }
 ```
 Authorization: a token without role `SUPER_ADMIN` is rejected with `403`.
 
@@ -204,15 +204,15 @@ server validates role, tenant, and an active Registration.
 
 | Action | Payload | Rules |
 |---|---|---|
-| `answer.submit` | question id, selected option id, attempt_no, client idempotency key | Rejected if past server-side close time (`reason: window_closed`) or participant eliminated. Server timestamp is authoritative. |
+| `answer.submit` | question id, selected option id, attempt_no | Rejected if past server-side close time (`reason: window_closed`) or participant eliminated. Server timestamp is authoritative; idempotency is derived server-side. |
 | `wildcard.activate` | type, question id | Subject to enabled set, usage limit, eligibility, cooldown; Fifty-Fifty rejected after an answer is selected. |
 | `moderator.reveal` | question id | Moderator only; Moderator-Controlled reveal mode. |
 | `moderator.advance` | group/question target | Moderator override of progression. |
 
 **Durability/ack semantics:** an `answer.submit` is acknowledged only after the
-answer is durably persisted with its server-accept timestamp. The client
-idempotency key plus the server-side `(contest, question, participant, attempt)`
-key ensure retries are not double-counted. A delayed ack does not revoke an
+answer is durably persisted with its server-accept timestamp. A deterministic
+server-side idempotency hash (`contest|question|participant|attempt`) ensures
+retries are not double-counted. A delayed ack does not revoke an
 already-accepted answer.
 
 ---

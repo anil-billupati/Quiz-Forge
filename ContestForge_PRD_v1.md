@@ -119,16 +119,22 @@ Key consequence: Standard, Speed, and Elimination modes are available to BOTH No
 
 |**Term**|**Definition**|
 |---|---|
+|**Organization / Tenant**|An isolated customer boundary. A Super Admin creates organizations; all other<br>roles are scoped to one tenant.|
+|**Super Admin**|Platform-scoped administrator who creates and manages organizations (tenants).|
+|**Org Admin**|Tenant-scoped administrator who configures contests and manages their lifecycle.|
 |**Contest**|A complete quiz event with a lifecycle, participants, and results.|
 |**Structure**|How a contest is organised: Normal (flat) or Grouped (questions split into<br>groups).|
 |**Configuration Block**|The set of mode, timing, scoring, wildcard, and elimination settings. Lives at<br>quiz level (Normal) or group level (Grouped).|
 |**Mode**|The behaviour profile of a quiz/group: Standard, Speed, or Elimination.|
 |**Group**|A named sub-section of a Grouped quiz with its own Configuration Block.|
 |**Participant**|A registered user competing in the contest.|
-|**Moderator**|An admin who can control reveal timing and progression during a live contest.|
+|**Moderator**|A tenant-scoped user who can control reveal timing and progression during a<br>live contest.|
 |**Wildcard**|A power-up a participant can activate for a temporary advantage.|
 |**Checkpoint**|A point at which elimination rules are evaluated.|
 |**Survivor**|A participant not yet eliminated in an Elimination-mode quiz/group.|
+|**JWT / Token**|Email/password authentication returns short-lived access and rotating refresh<br>tokens carrying role and tenant scope.|
+|**Role**|One of Super Admin, Org Admin, Moderator, or Participant. Determines permitted<br>operations and tenant scope.|
+|**Tenant Scope**|The isolation boundary enforced on every data access; cross-tenant access is<br>denied and logged.|
 
 
 
@@ -177,21 +183,17 @@ Whether at quiz level (Normal) or group level (Grouped), a Configuration Block c
 |**Question Duration**|5 – 300 seconds per question|
 |**Question Interval**|0 – 60 seconds between questions|
 |**Explanation Duration**|0 – 60 seconds the correct-answer explanation is shown|
-
-
-
-Page 4 
-
-© 2026 ContestForge. All rights reserved. 
-
-ContestForge  ·  Core Contest Engine PRD  v2.3 
-
-_CONFIDENTIAL_ 
-
-|**Field**|**Allowed Values / Notes**|
-|---|---|
 |**Leaderboard Duration**|0 – 60 seconds the interim leaderboard is shown|
-|**Wildcards**|Which wildcards are enabled, with usage limits and cooldowns|
+|**Reveal Mode**|Automatic | Moderator Controlled (see Section 4.3)|
+|**Ranking Criterion**|Score Only | Score + Time | Accuracy (see Section 7.3)|
+|**Tie Display**|Shared Rank | Fastest Participant | Least Incorrect (see Section 7.5)|
+|**Leaderboard Visibility**|Always | Post-question | Hidden | Masked (see Section 7.5)|
+|**Update Frequency**|Per answer | Per question | Per group (see Section 7.4)|
+|**Correct Points**|Default 10; configurable for Fixed scoring (Standard / Elimination)|
+|**Wrong Points**|Default 0; may be negative for negative marking|
+|**Second Chance Rate**|Default 0.5; applies when Second Chance wildcard is enabled|
+|**Time Bands / Decay**|Speed-mode scoring curve (bands or linear decay, see Section 5.3)|
+|**Wildcards**|Which wildcards are enabled, with usage limits, eligibility, cooldown, and group carryover|
 |**Elimination Rules**|Required when Mode = Elimination; ignored otherwise|
 
 
@@ -209,7 +211,7 @@ All contests, regardless of structure or mode, follow the same linear lifecycle.
 |**Scheduled**|Confirmed start time set. Engine initialises and arms.|
 |**Live**|Actively running. Question delivery and scoring in progress.|
 |**Completed**|All questions done or end time reached. Final scores calculated.|
-|**Archived**|Read-only historical record. Results and leaderboards preserved.|
+|**Archived**|Read-only historical record. Results and leaderboards are preserved<br>indefinitely.|
 
 
 
@@ -302,7 +304,10 @@ Reveal Mode controls when a question becomes visible. It is independent of the C
 |---|---|
 |**Automatic**|Questions reveal on a fixed schedule with no human action.|
 |**Moderator Controlled**|A moderator triggers each reveal manually; the interval timer pauses between<br>questions.|
-|**Scheduled**|Each question has its own pre-assigned reveal timestamp.|
+
+> **Note:** A per-question `Scheduled` reveal mode is deferred beyond v1; the
+> Configuration Block `reveal_mode` is `Automatic` or `Moderator Controlled` for
+> the initial release.
 
 
 
@@ -571,8 +576,10 @@ _CONFIDENTIAL_
 ```
 Group 1  Aptitude       Bottom 50% eliminated after the group
 Group 2  Java           Bottom 50% of survivors eliminated after the group
-Group 3  System Design  Top 10 advance; all others eliminated
-Result: only the top 10 finalists reach the final group.
+Group 3  System Design  Minimum score threshold required to advance;
+                        all others eliminated
+Result: only the participants who meet the Group 3 threshold reach the final
+stage; the Survivor Leaderboard tracks the remaining field.
 ```
 
 ## **9. Failure Handling & Acceptance Criteria** 

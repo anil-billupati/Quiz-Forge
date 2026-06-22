@@ -10,6 +10,27 @@ frontend:
   framework: nextjs
 region: tbd
 environments: tbd
-data-stores: tbd
-integrations: tbd
-compliance: none
+data-stores:
+  primary: postgresql
+  postgresql:
+    provider: aws-rds
+    deployment: multi-az
+    proxy: pgbouncer-if-needed
+    read_replica: true
+    backup_retention_days: 35
+  cache:
+    provider: aws-elasticache-redis
+    mode: cluster
+    uses:
+      - leaderboard-zsets
+      - pub-sub
+      - ws-presence
+      - dedupe-keys
+      - rate-limits
+      - command-stream
+integrations:
+  queue: redis-streams
+  edge: aws-waf-alb
+  secrets: aws-secrets-manager
+  observability: opentelemetry-aws-cloudwatch
+compliance: soc2-gdpr-readiness

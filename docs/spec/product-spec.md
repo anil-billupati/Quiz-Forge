@@ -80,6 +80,27 @@ Competes in contests.
 
 ---
 
+## 2.5 Role-Permission Matrix
+
+| Operation | Super Admin | Org Admin | Moderator | Participant |
+|---|---|---|---|---|
+| Create / list / suspend organizations | ✅ | ❌ | ❌ | ❌ |
+| Create / update / delete contests (Draft) | ❌ | ✅ | ❌ | ❌ |
+| Configure groups / configuration blocks (Draft) | ❌ | ✅ | ❌ | ❌ |
+| Author questions / options (Draft) | ❌ | ✅ | ❌ | ❌ |
+| Advance contest lifecycle | ❌ | ✅ | ❌ | ❌ |
+| View contest results / exports | ❌ | ✅ | ✅* | ❌ |
+| Control live reveal / progression override | ❌ | ✅ | ✅ | ❌ |
+| Self-register for a contest | ❌ | ❌ | ❌ | ✅ |
+| Submit answers / activate wildcards | ❌ | ❌ | ❌ | ✅ |
+| View live leaderboards | ❌ | ✅ | ✅ | ✅ |
+
+\* Moderator may view live dashboards and post-contest results; Org Admin owns
+all result exports and wildcard audit logs. All tenant-scoped operations are
+filtered to the caller's tenant; cross-tenant access is denied and logged.
+
+---
+
 ## 3. Functional Requirements
 
 Numbered for traceability. **FR-#**.
@@ -91,6 +112,13 @@ Numbered for traceability. **FR-#**.
 - **FR-3** Every tenant-scoped entity (contest, question, participant, answer,
   result) is isolated to its organization; no cross-tenant read or write is
   possible.
+- **FR-3a** Each organization has configurable resource limits:
+  max concurrent live contests, max participants per contest, max questions per
+  contest, and max API/WebSocket request rates. Limits are enforced at the API
+  and stored in `TenantSettings`.
+- **FR-3b** The platform records per-tenant usage aggregates (`TenantUsageRecord`)
+  for capacity planning and future billing, even though billing itself is out of
+  scope for v1.
 - **FR-4** All user types authenticate via email + password and receive a JWT
   (access + refresh). Tokens carry the user's role and tenant scope (except
   Super Admin, which is platform-scoped).
@@ -229,25 +257,35 @@ Numbered for traceability. **FR-#**.
 
 ## 4. Non-Functional Requirements
 
-- **NFR-1 (Latency — delivery):** Questions delivered to all participants
-  within 200ms of scheduled reveal at up to 10,000 concurrent users.
-- **NFR-2 (Timer accuracy):** Server-side timer accuracy within ±50ms over a
+All latency targets are server-side, measured at the API/WebSocket gateway
+unless otherwise noted. "Support" means the target is met while error rate
+remains < 0.1 %.
+
+- **NFR-1 (Latency — delivery):** p99 question fan-out latency ≤ 200 ms from
+  scheduled reveal to WebSocket dispatch, at up to 10,000 concurrent
+  participants per contest.
+- **NFR-2 (Timer accuracy):** p99 server-side timer drift ≤ ±50 ms over a
   5-minute session.
-- **NFR-3 (Leaderboard push):** Updates pushed within 500ms at ≤5,000
-  concurrent users; within 2s at peak load (≤20,000).
-- **NFR-4 (Scale):** Support up to 10,000 concurrent participants per contest
-  (20,000 at peak for leaderboard targets).
-- **NFR-5 (Durability):** Zero answer loss across 10,000 submissions with a 1%
-  induced persistence-failure rate.
-- **NFR-6 (Recovery):** Contest resumes within 30s of a simulated crash with
-  state intact and no double-scoring.
-- **NFR-7 (Reconnection):** A reconnecting participant is restored within 3s.
-- **NFR-8 (Tenant isolation):** No cross-tenant data access under any
-  operation; isolation verified by automated tests.
-- **NFR-9 (Consistency):** Score totals match before failure and after
-  recovery.
+- **NFR-3 (Leaderboard push):** p99 leaderboard update push latency ≤ 500 ms at
+  ≤ 5,000 concurrent participants; ≤ 2 s at peak load (≤ 20,000).
+- **NFR-4 (Scale):** Support up to 10,000 concurrent participants per contest;
+  leaderboard push target covers 20,000 at peak.
+- **NFR-5 (Durability):** Answer loss rate < 0.01 % across 10,000 submissions
+  with a 1 % induced persistence-failure rate.
+- **NFR-6 (Recovery):** A contest resumes within 30 s of a simulated crash of
+  the API service or worker pods; state is intact and no double-scoring occurs.
+- **NFR-7 (Reconnection):** p99 participant restore time ≤ 3 s after a
+  WebSocket reconnect (server-side state + open submission window).
+- **NFR-8 (Tenant isolation):** No cross-tenant data access on any implemented
+  endpoint or WebSocket action; verified by an automated isolation suite that
+  covers 100 % of tenant-scoped resources.
+- **NFR-9 (Consistency):** Score totals are identical before a failure and after
+  recovery (exact integer equality per participant and in aggregate).
 - **NFR-10 (Mode correctness):** Each mode applies its correct scoring model in
-  100% of regression cases.
+  100 % of regression cases.
+- **NFR-11 (Rate limiting):** API and WebSocket rate limits are enforced per
+  user, per tenant, and per IP; legitimate traffic is never throttled below
+  the configured limits.
 
 ---
 
@@ -259,7 +297,7 @@ Measurable, mapped to the PRD acceptance criteria:
 |---|---|
 | No answer loss | Zero of 10,000 submissions lost at 1% induced persistence-failure rate (NFR-5). |
 | Contest recovery | Resume within 30s of simulated crash, state intact, no double-scoring (NFR-6). |
-| Ranking recovery | Rankings correct after total cache-data loss (NFR-3/9). |
+| Ranking recovery | Rankings correct after total cache-data loss (FR-44, NFR-9). |
 | Consistent scoring | Score totals identical pre-failure and post-recovery (NFR-9). |
 | Mode correctness | Correct scoring model applied in 100% of regression cases (NFR-10). |
 | Reconnection | Participant restored within 3s (NFR-7). |
@@ -286,12 +324,28 @@ The Core Contest Engine spec does **not** cover:
 
 ---
 
-## 7. Open Questions Remaining
+## 7. Compliance & Data Lifecycle
 
-1. **Compliance** — Recorded as "none"; confirm whether SOC 2 / GDPR apply
-   before production launch (carried from kickoff).
+- **Compliance baseline:** SOC 2 Type II and GDPR readiness. Full certification
+  scope to be confirmed with stakeholders before production launch.
+- **Data residency:** v1 operates in a single platform region (configured in
+  `infra.yaml`); per-tenant region selection is deferred to a later release.
+- **Encryption:** TLS/WSS in transit; RDS/ElastiCache encryption at rest;
+  application-level encryption for participant PII.
+- **Retention:** active and archived contest data retained indefinitely while
+  the tenant is active. Tenant soft-delete grace period is 30 days, followed by
+  hard deletion with cascade.
+- **Right to erasure / export:** supported via tenant deletion or per-user
+  deletion flows; documented in `.neutron/security.md`.
+
+## 8. Open Questions Remaining
+
+1. **Compliance** — Baseline set to SOC 2 Type II and GDPR readiness; full
+   audit/certification scope to be confirmed with stakeholders before production
+   launch.
 2. **Timeline / Budget** — Not yet provided (carried from kickoff).
-3. **Notification transport** — Eliminations and acknowledgements are emitted
-   as events; the concrete channel (in-app only vs. email) is undecided.
-4. **Negative marking defaults** — PRD allows configured negative marks; default
-   policy per tenant not yet specified.
+3. **Notification transport** — In-app WebSocket events for v1; email/SMS/webhooks
+   deferred to a later integration.
+4. **Negative marking defaults** — `wrong_points` defaults to `0` per
+   Configuration Block. Per-tenant defaults may be added once a `TenantSettings`
+   entity is introduced.
