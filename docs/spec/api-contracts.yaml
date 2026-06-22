@@ -1,14 +1,22 @@
 openapi: 3.0.3
 info:
   title: ContestForge Core Contest Engine API
-  version: 0.1.0
+  version: 1.0.0
   description: >
-    Multi-tenant live contest engine. REST endpoints for tenancy, contest
-    authoring, lifecycle, registration, and results. Live question delivery,
+    Multi-tenant live contest engine. REST endpoints cover tenancy, user
+    management, contest authoring, lifecycle, registration, live-runtime
+    controls, results, notifications, and audit. Live question delivery,
     answer submission, leaderboard, and elimination events flow over a
     WebSocket channel (documented in api-contracts.md §WebSocket).
-    All tenant-scoped endpoints require a JWT whose claims include the
-    caller's role and tenant_id; cross-tenant access is rejected.
+
+    Authentication: every endpoint except /auth/login, /auth/refresh, /health,
+    and /ready requires a JWT bearer token whose claims include the caller's
+    role and tenant_id. Cross-tenant access is rejected with 403.
+
+    Onboarding: the first Super Admin is bootstrapped by an SQL script and is
+    not exposed in this API. A Super Admin creates an organization (which
+    provisions its initial Org Admin). An Org Admin creates co-Org-Admins,
+    Moderators, and Participants via POST /users. There is no public self-signup.
 
 servers:
   - url: https://api.contestforge.example/v1
@@ -19,15 +27,22 @@ security:
 
 tags:
   - name: Auth
+  - name: Users
   - name: Organizations
   - name: Contests
+  - name: Groups
   - name: Configuration
   - name: Questions
-  - name: Lifecycle
   - name: Registration
+  - name: Lifecycle
+  - name: Live
   - name: Results
+  - name: Notifications
+  - name: Audit
+  - name: Ops
 
 paths:
+  # ───────────────────────────── Auth & Session ────────────────────────────
   /auth/login:
     post:
       tags: [Auth]
@@ -44,12 +59,13 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/TokenPair' }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
   /auth/refresh:
     post:
       tags: [Auth]
-      summary: Exchange a refresh token for a new access token
+      summary: Exchange a refresh token for a new token pair (rotates the token)
       security: []
       requestBody:
         required: true
@@ -68,10 +84,144 @@ paths:
               schema: { $ref: '#/components/schemas/TokenPair' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Revoke the presented refresh token (and its rotation chain)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: { type: string }
+      responses:
+        '204': { description: Logged out (token revoked) }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Return the current authenticated principal
+      responses:
+        '200':
+          description: Current user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /auth/change-password:
+    post:
+      tags: [Auth]
+      summary: Change the current user's password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_password, new_password]
+              properties:
+                current_password: { type: string, format: password }
+                new_password: { type: string, format: password, minLength: 8 }
+      responses:
+        '204': { description: Password changed }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ───────────────────────────────── Users ─────────────────────────────────
+  /users:
+    post:
+      tags: [Users]
+      summary: Create a tenant user (Org Admin). Role limited to ORG_ADMIN, MODERATOR, PARTICIPANT.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateUserRequest' }
+      responses:
+        '201':
+          description: User created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: Email already exists in this tenant
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+    get:
+      tags: [Users]
+      summary: List users in the caller's tenant (Org Admin)
+      parameters:
+        - in: query
+          name: role
+          schema: { type: string, enum: [ORG_ADMIN, MODERATOR, PARTICIPANT] }
+        - in: query
+          name: status
+          schema: { type: string, enum: [ACTIVE, DISABLED] }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+      responses:
+        '200':
+          description: Users
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: '#/components/schemas/User' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /users/{userId}:
+    parameters:
+      - { $ref: '#/components/parameters/UserId' }
+    get:
+      tags: [Users]
+      summary: Get a user in the caller's tenant
+      responses:
+        '200':
+          description: User
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Users]
+      summary: Update a user's name or status (Org Admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                first_name: { type: string }
+                last_name: { type: string }
+                status: { type: string, enum: [ACTIVE, DISABLED] }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ───────────────────────────── Organizations ─────────────────────────────
   /organizations:
     post:
       tags: [Organizations]
-      summary: Create an organization (tenant). Super Admin only.
+      summary: Create an organization (tenant) and its initial Org Admin. Super Admin only.
       requestBody:
         required: true
         content:
@@ -83,20 +233,78 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Organization' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: slug, portal_url, or custom_domain already in use
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
     get:
       tags: [Organizations]
       summary: List organizations. Super Admin only.
+      parameters:
+        - in: query
+          name: status
+          schema: { type: string, enum: [ACTIVE, SUSPENDED] }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
       responses:
         '200':
           description: Organizations
           content:
             application/json:
               schema:
-                type: array
-                items: { $ref: '#/components/schemas/Organization' }
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: '#/components/schemas/Organization' }
         '403': { $ref: '#/components/responses/Forbidden' }
+
+  /organizations/{orgId}:
+    parameters:
+      - { $ref: '#/components/parameters/OrgId' }
+    get:
+      tags: [Organizations]
+      summary: Get an organization. Super Admin only.
+      responses:
+        '200':
+          description: Organization
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Organization' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Organizations]
+      summary: Update mutable org fields (name, custom_domain). Super Admin only.
+      description: >
+        slug and portal_url are immutable once the tenant has published its
+        first contest (BR-19) and are not accepted here.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                custom_domain: { type: string, nullable: true }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Organization' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: custom_domain already in use
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /organizations/{orgId}/status:
     patch:
@@ -122,6 +330,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  # ──────────────────────────────── Contests ───────────────────────────────
   /contests:
     post:
       tags: [Contests]
@@ -138,28 +347,36 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Contest' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
     get:
       tags: [Contests]
-      summary: List contests in the caller's tenant.
+      summary: List contests in the caller's tenant
       parameters:
         - in: query
           name: status
           schema: { $ref: '#/components/schemas/LifecycleStatus' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
       responses:
         '200':
           description: Contests
           content:
             application/json:
               schema:
-                type: array
-                items: { $ref: '#/components/schemas/Contest' }
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: '#/components/schemas/Contest' }
 
   /contests/{contestId}:
+    parameters:
+      - { $ref: '#/components/parameters/ContestId' }
     get:
       tags: [Contests]
-      summary: Get a contest (with config/groups).
-      parameters:
-        - { $ref: '#/components/parameters/ContestId' }
+      summary: Get a contest (with groups + configuration)
       responses:
         '200':
           description: Contest
@@ -169,9 +386,7 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
     patch:
       tags: [Contests]
-      summary: Update contest metadata. Allowed only while editable (Draft).
-      parameters:
-        - { $ref: '#/components/parameters/ContestId' }
+      summary: Update contest metadata. Allowed only while Draft.
       requestBody:
         required: true
         content:
@@ -184,83 +399,22 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Contest' }
         '409': { $ref: '#/components/responses/Conflict' }
-
-  /contests/{contestId}/groups:
-    post:
-      tags: [Configuration]
-      summary: Add a group to a Grouped contest (Draft only).
-      parameters:
-        - { $ref: '#/components/parameters/ContestId' }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/CreateGroupRequest' }
+    delete:
+      tags: [Contests]
+      summary: Delete a contest. Allowed only while Draft.
       responses:
-        '201':
-          description: Group created
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Group' }
+        '204': { description: Deleted }
         '409': { $ref: '#/components/responses/Conflict' }
-
-  /contests/{contestId}/configuration:
-    put:
-      tags: [Configuration]
-      summary: >
-        Set the Configuration Block. For Normal contests target the contest;
-        for Grouped contests provide group_id. Editable until Registration Open.
-      parameters:
-        - { $ref: '#/components/parameters/ContestId' }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/ConfigurationBlock' }
-      responses:
-        '200':
-          description: Configuration saved
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ConfigurationBlock' }
-        '409': { $ref: '#/components/responses/Conflict' }
-
-  /contests/{contestId}/questions:
-    post:
-      tags: [Questions]
-      summary: Add a question (Draft only).
-      parameters:
-        - { $ref: '#/components/parameters/ContestId' }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/CreateQuestionRequest' }
-      responses:
-        '201':
-          description: Question created
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Question' }
-        '409': { $ref: '#/components/responses/Conflict' }
-    get:
-      tags: [Questions]
-      summary: List questions for a contest (admin view includes correctness).
-      parameters:
-        - { $ref: '#/components/parameters/ContestId' }
-      responses:
-        '200':
-          description: Questions
-          content:
-            application/json:
-              schema:
-                type: array
-                items: { $ref: '#/components/schemas/Question' }
 
   /contests/{contestId}/lifecycle:
     post:
       tags: [Lifecycle]
-      summary: Transition the contest to the next lifecycle stage.
+      summary: Transition the contest to the next lifecycle stage
+      description: >
+        Advances along the fixed sequence DRAFT → PUBLISHED → REGISTRATION_OPEN
+        → REGISTRATION_CLOSED → SCHEDULED → LIVE → COMPLETED → ARCHIVED. Skipping
+        a stage or unmet preconditions return 409. SCHEDULED requires
+        scheduled_start_at.
       parameters:
         - { $ref: '#/components/parameters/ContestId' }
       requestBody:
@@ -282,16 +436,215 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Contest' }
-        '409':
-          $ref: '#/components/responses/Conflict'
-          description: Illegal transition (stage skipped or preconditions unmet)
+        '409': { $ref: '#/components/responses/Conflict' }
 
+  # ───────────────────────────────── Groups ────────────────────────────────
+  /contests/{contestId}/groups:
+    parameters:
+      - { $ref: '#/components/parameters/ContestId' }
+    post:
+      tags: [Groups]
+      summary: Add a group to a Grouped contest (Draft only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateGroupRequest' }
+      responses:
+        '201':
+          description: Group created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Group' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    get:
+      tags: [Groups]
+      summary: List groups for a Grouped contest
+      responses:
+        '200':
+          description: Groups
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Group' }
+
+  /contests/{contestId}/groups/{groupId}:
+    parameters:
+      - { $ref: '#/components/parameters/ContestId' }
+      - { $ref: '#/components/parameters/GroupId' }
+    patch:
+      tags: [Groups]
+      summary: Update a group (name, sequence, weight). Draft only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                sequence: { type: integer }
+                weight: { type: number, nullable: true }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Group' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    delete:
+      tags: [Groups]
+      summary: Delete a group. Draft only.
+      responses:
+        '204': { description: Deleted }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  # ───────────────────────────── Configuration ─────────────────────────────
+  /contests/{contestId}/configuration:
+    parameters:
+      - { $ref: '#/components/parameters/ContestId' }
+    put:
+      tags: [Configuration]
+      summary: Set a Configuration Block (Normal = contest scope; Grouped = supply group_id). Editable until Registration Open.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConfigurationBlock' }
+      responses:
+        '200':
+          description: Configuration saved
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigurationBlock' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+    get:
+      tags: [Configuration]
+      summary: Get the configuration block(s) — one for Normal, one per group for Grouped
+      responses:
+        '200':
+          description: Configuration block(s)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ConfigurationBlock' }
+
+  # ──────────────────────────── Questions & Options ────────────────────────
+  /contests/{contestId}/questions:
+    parameters:
+      - { $ref: '#/components/parameters/ContestId' }
+    post:
+      tags: [Questions]
+      summary: Add a question (Draft only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateQuestionRequest' }
+      responses:
+        '201':
+          description: Question created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Question' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+    get:
+      tags: [Questions]
+      summary: List questions for a contest (admin view includes correctness)
+      parameters:
+        - in: query
+          name: group_id
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Questions
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Question' }
+
+  /contests/{contestId}/questions/{questionId}:
+    parameters:
+      - { $ref: '#/components/parameters/ContestId' }
+      - { $ref: '#/components/parameters/QuestionId' }
+    get:
+      tags: [Questions]
+      summary: Get a question (admin view)
+      responses:
+        '200':
+          description: Question
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Question' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Questions]
+      summary: Update a question (Draft only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sequence: { type: integer }
+                text: { type: string }
+                explanation: { type: string, nullable: true }
+                group_id: { type: string, format: uuid, nullable: true }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Question' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    delete:
+      tags: [Questions]
+      summary: Delete a question (Draft only)
+      responses:
+        '204': { description: Deleted }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /contests/{contestId}/questions/{questionId}/options:
+    parameters:
+      - { $ref: '#/components/parameters/ContestId' }
+      - { $ref: '#/components/parameters/QuestionId' }
+    put:
+      tags: [Questions]
+      summary: Replace the full option set for a question (Draft only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [options]
+              properties:
+                options:
+                  type: array
+                  minItems: 2
+                  items: { $ref: '#/components/schemas/OptionInput' }
+      responses:
+        '200':
+          description: Options replaced
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Question' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  # ─────────────────────────────── Registration ────────────────────────────
   /contests/{contestId}/registrations:
+    parameters:
+      - { $ref: '#/components/parameters/ContestId' }
     post:
       tags: [Registration]
-      summary: Register the calling participant for a contest (Registration Open).
-      parameters:
-        - { $ref: '#/components/parameters/ContestId' }
+      summary: Register the calling participant (Registration Open only)
       responses:
         '201':
           description: Registered
@@ -300,32 +653,129 @@ paths:
               schema: { $ref: '#/components/schemas/Registration' }
         '409':
           $ref: '#/components/responses/Conflict'
-          description: Registration not open or already registered
     get:
       tags: [Registration]
-      summary: List registrations (Org Admin / Moderator).
+      summary: List registrations (Org Admin / Moderator)
       parameters:
-        - { $ref: '#/components/parameters/ContestId' }
+        - in: query
+          name: status
+          schema: { type: string, enum: [REGISTERED, ACTIVE, ELIMINATED, COMPLETED] }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
       responses:
         '200':
           description: Registrations
           content:
             application/json:
               schema:
-                type: array
-                items: { $ref: '#/components/schemas/Registration' }
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: '#/components/schemas/Registration' }
 
+  /contests/{contestId}/registrations/me:
+    parameters:
+      - { $ref: '#/components/parameters/ContestId' }
+    get:
+      tags: [Registration]
+      summary: Get the caller's own registration for this contest
+      responses:
+        '200':
+          description: Registration
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Registration' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /contests/{contestId}/registrations/{registrationId}:
+    parameters:
+      - { $ref: '#/components/parameters/ContestId' }
+      - in: path
+        name: registrationId
+        required: true
+        schema: { type: string, format: uuid }
+    delete:
+      tags: [Registration]
+      summary: Withdraw a registration (self before Registration Closed, or Org Admin)
+      responses:
+        '204': { description: Withdrawn }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  # ──────────────────────────────── Live runtime ───────────────────────────
+  /contests/{contestId}/live-state:
+    parameters:
+      - { $ref: '#/components/parameters/ContestId' }
+    get:
+      tags: [Live]
+      summary: Participant reconnect snapshot of current live state
+      description: >
+        Returns the caller's authoritative live state for reconnection (FR-43):
+        the current question (without correctness), the server-side submission
+        window close time, and the caller's status/score. Available while LIVE.
+      responses:
+        '200':
+          description: Live state snapshot
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LiveState' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          $ref: '#/components/responses/Conflict'
+          description: Contest is not Live
+
+  /contests/{contestId}/control/reveal:
+    parameters:
+      - { $ref: '#/components/parameters/ContestId' }
+    post:
+      tags: [Live]
+      summary: Moderator manual reveal of the current/next question (Moderator-Controlled mode)
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                question_id: { type: string, format: uuid, nullable: true }
+      responses:
+        '202': { description: Reveal accepted }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /contests/{contestId}/control/advance:
+    parameters:
+      - { $ref: '#/components/parameters/ContestId' }
+    post:
+      tags: [Live]
+      summary: Moderator override to advance progression (question or group)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [scope]
+              properties:
+                scope: { type: string, enum: [QUESTION, GROUP] }
+      responses:
+        '202': { description: Advance accepted }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  # ───────────────────────── Results & Leaderboards ────────────────────────
   /contests/{contestId}/leaderboard:
+    parameters:
+      - { $ref: '#/components/parameters/ContestId' }
     get:
       tags: [Results]
-      summary: >
-        Get the current leaderboard snapshot. Live pushes happen over
-        WebSocket; this is a REST snapshot/fallback.
+      summary: Leaderboard snapshot (live pushes are over WebSocket; this is a REST fallback)
       parameters:
-        - { $ref: '#/components/parameters/ContestId' }
         - in: query
           name: view
-          schema: { type: string, enum: [CONTEST, GROUP, SURVIVOR] }
+          schema: { type: string, enum: [CONTEST, GROUP, SURVIVOR], default: CONTEST }
         - in: query
           name: group_id
           schema: { type: string, format: uuid }
@@ -339,11 +789,11 @@ paths:
                 items: { $ref: '#/components/schemas/LeaderboardEntry' }
 
   /contests/{contestId}/results:
+    parameters:
+      - { $ref: '#/components/parameters/ContestId' }
     get:
       tags: [Results]
-      summary: Final results and per-participant breakdown (Completed/Archived).
-      parameters:
-        - { $ref: '#/components/parameters/ContestId' }
+      summary: Final results and per-participant breakdown (Completed/Archived)
       responses:
         '200':
           description: Results
@@ -351,12 +801,46 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ContestResults' }
 
-  /contests/{contestId}/wildcard-audit:
+  /contests/{contestId}/results/export:
+    parameters:
+      - { $ref: '#/components/parameters/ContestId' }
     get:
       tags: [Results]
-      summary: Wildcard activation audit log (Org Admin).
+      summary: Export final results (CSV or JSON)
       parameters:
-        - { $ref: '#/components/parameters/ContestId' }
+        - in: query
+          name: format
+          schema: { type: string, enum: [csv, json], default: csv }
+      responses:
+        '200':
+          description: Export
+          content:
+            text/csv:
+              schema: { type: string, format: binary }
+            application/json:
+              schema: { $ref: '#/components/schemas/ContestResults' }
+
+  /contests/{contestId}/eliminations:
+    parameters:
+      - { $ref: '#/components/parameters/ContestId' }
+    get:
+      tags: [Results]
+      summary: Elimination events for the contest (Org Admin / Moderator)
+      responses:
+        '200':
+          description: Elimination events
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/EliminationEvent' }
+
+  /contests/{contestId}/wildcard-audit:
+    parameters:
+      - { $ref: '#/components/parameters/ContestId' }
+    get:
+      tags: [Results]
+      summary: Wildcard activation audit log (Org Admin)
       responses:
         '200':
           description: Wildcard activations
@@ -365,6 +849,125 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/WildcardActivation' }
+
+  # ─────────────────────────────── Notifications ───────────────────────────
+  /me/notifications:
+    get:
+      tags: [Notifications]
+      summary: List the caller's notifications
+      parameters:
+        - in: query
+          name: unread_only
+          schema: { type: boolean, default: false }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+      responses:
+        '200':
+          description: Notifications
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: '#/components/schemas/Notification' }
+
+  /me/notifications/{notificationId}/ack:
+    parameters:
+      - in: path
+        name: notificationId
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [Notifications]
+      summary: Acknowledge (mark delivered/read) a notification
+      responses:
+        '200':
+          description: Acknowledged
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Notification' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ──────────────────────────────────── Audit ──────────────────────────────
+  /audit:
+    get:
+      tags: [Audit]
+      summary: Query the audit log (Org Admin = tenant-scoped; Super Admin = platform-wide)
+      parameters:
+        - in: query
+          name: entity_type
+          schema: { type: string }
+        - in: query
+          name: action
+          schema: { type: string }
+        - in: query
+          name: actor_user_id
+          schema: { type: string, format: uuid }
+        - in: query
+          name: from
+          schema: { type: string, format: date-time }
+        - in: query
+          name: to
+          schema: { type: string, format: date-time }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+      responses:
+        '200':
+          description: Audit entries
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: '#/components/schemas/AuditLogEntry' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ───────────────────────────────────── Ops ───────────────────────────────
+  /health:
+    get:
+      tags: [Ops]
+      summary: Liveness probe
+      security: []
+      responses:
+        '200':
+          description: Alive
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+
+  /ready:
+    get:
+      tags: [Ops]
+      summary: Readiness probe (checks DB and Redis)
+      security: []
+      responses:
+        '200':
+          description: Ready
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ready }
+                  dependencies:
+                    type: object
+                    additionalProperties: { type: string }
+        '503':
+          description: Not ready
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
 components:
   securitySchemes:
@@ -379,13 +982,42 @@ components:
       name: orgId
       required: true
       schema: { type: string, format: uuid }
+    UserId:
+      in: path
+      name: userId
+      required: true
+      schema: { type: string, format: uuid }
     ContestId:
       in: path
       name: contestId
       required: true
       schema: { type: string, format: uuid }
+    GroupId:
+      in: path
+      name: groupId
+      required: true
+      schema: { type: string, format: uuid }
+    QuestionId:
+      in: path
+      name: questionId
+      required: true
+      schema: { type: string, format: uuid }
+    Limit:
+      in: query
+      name: limit
+      schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+    Cursor:
+      in: query
+      name: cursor
+      schema: { type: string }
+      description: Opaque cursor returned by the previous page
 
   responses:
+    BadRequest:
+      description: Malformed request (schema/parse error)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
     Unauthorized:
       description: Missing or invalid token
       content:
@@ -406,6 +1038,11 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
+    UnprocessableEntity:
+      description: Semantic validation error (e.g. elimination block missing rules)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
 
   schemas:
     Error:
@@ -418,6 +1055,13 @@ components:
             message: { type: string }
             details: { type: object, additionalProperties: true }
 
+    Page:
+      type: object
+      description: Pagination envelope; concrete `items` defined per endpoint
+      properties:
+        next_cursor: { type: string, nullable: true }
+        has_more: { type: boolean }
+
     LoginRequest:
       type: object
       required: [email, password]
@@ -426,7 +1070,7 @@ components:
         password: { type: string, format: password }
         tenant_slug:
           type: string
-          description: Optional tenant hint for non-super-admin users
+          description: Tenant hint for non-super-admin users (matches Organization.slug)
 
     TokenPair:
       type: object
@@ -437,21 +1081,59 @@ components:
         expires_in: { type: integer, example: 900 }
         role: { type: string, enum: [SUPER_ADMIN, ORG_ADMIN, MODERATOR, PARTICIPANT] }
 
+    User:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid, nullable: true }
+        email: { type: string, format: email }
+        first_name: { type: string }
+        last_name: { type: string }
+        role: { type: string, enum: [SUPER_ADMIN, ORG_ADMIN, MODERATOR, PARTICIPANT] }
+        status: { type: string, enum: [ACTIVE, DISABLED] }
+        created_at: { type: string, format: date-time }
+
+    CreateUserRequest:
+      type: object
+      required: [email, first_name, last_name, role]
+      properties:
+        email: { type: string, format: email }
+        first_name: { type: string }
+        last_name: { type: string }
+        role:
+          type: string
+          enum: [ORG_ADMIN, MODERATOR, PARTICIPANT]
+          description: SUPER_ADMIN is not allowed (bootstrapped via SQL only)
+        password:
+          type: string
+          format: password
+          description: Optional; if omitted, an invite/temporary credential flow is used
+
     Organization:
       type: object
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
+        slug: { type: string }
+        portal_url: { type: string, format: uri }
+        custom_domain: { type: string, nullable: true }
         status: { type: string, enum: [ACTIVE, SUSPENDED] }
         created_at: { type: string, format: date-time }
 
     CreateOrganizationRequest:
       type: object
-      required: [name, admin_email]
+      required: [name, slug, portal_url, admin_email, admin_first_name, admin_last_name]
       properties:
         name: { type: string }
+        slug:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$'
+          description: Unique tenant key / subdomain label
+        portal_url: { type: string, format: uri }
+        custom_domain: { type: string, nullable: true }
         admin_email: { type: string, format: email }
-        admin_display_name: { type: string }
+        admin_first_name: { type: string }
+        admin_last_name: { type: string }
 
     LifecycleStatus:
       type: string
@@ -479,6 +1161,7 @@ components:
           enum: [SUM, WEIGHTED_SUM, BEST_N]
           nullable: true
         rollup_best_n: { type: integer, nullable: true }
+        created_at: { type: string, format: date-time }
 
     ContestDetail:
       allOf:
@@ -489,7 +1172,8 @@ components:
               type: array
               items: { $ref: '#/components/schemas/Group' }
             configuration:
-              $ref: '#/components/schemas/ConfigurationBlock'
+              type: array
+              items: { $ref: '#/components/schemas/ConfigurationBlock' }
 
     CreateContestRequest:
       type: object
@@ -528,6 +1212,7 @@ components:
       type: object
       required: [mode, question_duration_s]
       properties:
+        id: { type: string, format: uuid, readOnly: true }
         group_id:
           type: string
           format: uuid
@@ -540,7 +1225,7 @@ components:
         leaderboard_duration_s: { type: integer, minimum: 0, maximum: 60 }
         reveal_mode:
           type: string
-          enum: [AUTOMATIC, MODERATOR_CONTROLLED, SCHEDULED]
+          enum: [AUTOMATIC, MODERATOR_CONTROLLED]
         ranking_criterion:
           type: string
           enum: [SCORE_ONLY, SCORE_TIME, ACCURACY]
@@ -572,6 +1257,15 @@ components:
             max_points: { type: integer }
             floor: { type: integer }
             decay_rate: { type: number }
+        survivor_score_reset:
+          type: boolean
+          default: false
+          description: When true, survivors' scores reset at the next group start (FR-37)
+        elimination_combine_operator:
+          type: string
+          enum: [AND, OR]
+          nullable: true
+          description: Block-level operator combining all elimination rules (ELIMINATION only)
         wildcards:
           type: array
           items: { $ref: '#/components/schemas/WildcardConfig' }
@@ -586,6 +1280,7 @@ components:
 
     WildcardConfig:
       type: object
+      required: [type]
       properties:
         type: { type: string, enum: [FIFTY_FIFTY, SECOND_CHANCE, SKIP] }
         usage_limit: { type: integer }
@@ -595,6 +1290,7 @@ components:
 
     EliminationRule:
       type: object
+      required: [type]
       properties:
         type:
           type: string
@@ -602,10 +1298,10 @@ components:
         n_value: { type: integer, nullable: true }
         percent_value: { type: number, nullable: true }
         min_score: { type: integer, nullable: true }
-        combine_operator: { type: string, enum: [AND, OR] }
 
     Checkpoint:
       type: object
+      required: [type]
       properties:
         type:
           type: string
@@ -621,17 +1317,18 @@ components:
         sequence: { type: integer }
         text: { type: string }
         explanation: { type: string, nullable: true }
-        reveal_at: { type: string, format: date-time, nullable: true }
         options:
           type: array
           minItems: 2
-          items:
-            type: object
-            required: [text, is_correct]
-            properties:
-              text: { type: string }
-              is_correct: { type: boolean }
-              ordinal: { type: integer }
+          items: { $ref: '#/components/schemas/OptionInput' }
+
+    OptionInput:
+      type: object
+      required: [text, is_correct]
+      properties:
+        text: { type: string }
+        is_correct: { type: boolean }
+        ordinal: { type: integer }
 
     Question:
       type: object
@@ -659,7 +1356,44 @@ components:
         contest_id: { type: string, format: uuid }
         participant_id: { type: string, format: uuid }
         status: { type: string, enum: [REGISTERED, ACTIVE, ELIMINATED, COMPLETED] }
+        spectator_access: { type: boolean }
+        final_rank: { type: integer, nullable: true }
+        final_score: { type: integer, nullable: true }
         registered_at: { type: string, format: date-time }
+        joined_at: { type: string, format: date-time, nullable: true }
+
+    LiveState:
+      type: object
+      description: Participant reconnect snapshot (FR-43)
+      properties:
+        contest_id: { type: string, format: uuid }
+        lifecycle_status: { $ref: '#/components/schemas/LifecycleStatus' }
+        phase:
+          type: string
+          enum: [DISPLAY, SUBMISSION, EVALUATION, EXPLANATION, LEADERBOARD, INTERVAL, BETWEEN_GROUPS, ENDED]
+        current_group_id: { type: string, format: uuid, nullable: true }
+        current_question:
+          type: object
+          nullable: true
+          description: Current question without correctness flags
+          properties:
+            id: { type: string, format: uuid }
+            sequence: { type: integer }
+            text: { type: string }
+            options:
+              type: array
+              items:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+                  text: { type: string }
+                  ordinal: { type: integer }
+            submission_close_at:
+              type: string
+              format: date-time
+              description: Authoritative server-side window close (FR-20)
+        my_status: { type: string, enum: [REGISTERED, ACTIVE, ELIMINATED, COMPLETED] }
+        my_score: { type: integer }
 
     LeaderboardEntry:
       type: object
@@ -690,6 +1424,17 @@ components:
               eliminated: { type: boolean }
               final_rank: { type: integer }
 
+    EliminationEvent:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        participant_id: { type: string, format: uuid }
+        checkpoint_id: { type: string, format: uuid }
+        final_rank: { type: integer }
+        final_score: { type: integer }
+        eliminated_at: { type: string, format: date-time }
+        spectator_granted: { type: boolean }
+
     WildcardActivation:
       type: object
       properties:
@@ -699,3 +1444,27 @@ components:
         type: { type: string, enum: [FIFTY_FIFTY, SECOND_CHANCE, SKIP] }
         activated_at: { type: string, format: date-time }
         outcome: { type: string }
+
+    Notification:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        contest_id: { type: string, format: uuid, nullable: true }
+        type:
+          type: string
+          enum: [ELIMINATION, ANSWER_ACK, SPECTATOR_GRANTED, CONTEST_PROGRESS]
+        payload: { type: object, additionalProperties: true }
+        created_at: { type: string, format: date-time }
+        delivered_at: { type: string, format: date-time, nullable: true }
+
+    AuditLogEntry:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid, nullable: true }
+        actor_user_id: { type: string, format: uuid }
+        action: { type: string }
+        entity_type: { type: string }
+        entity_id: { type: string, format: uuid }
+        metadata: { type: object, additionalProperties: true }
+        created_at: { type: string, format: date-time }
