@@ -167,3 +167,109 @@ concurrent users, followed by spec remediation.
 ### Open questions remaining
 - Timeline ; Budget ; AWS region(s) and environments ; exact ECS/EKS sizing and
   cost estimates ; full compliance certification scope before production launch.
+
+---
+
+## 2026-06-22 — Domain model: tenant URL, user names & schema gap-fill
+
+**Trigger:** User (acting as product owner) request, executed via plan mode.
+
+### Artifacts read
+- `ContestForge_PRD_v1.md`, `docs/spec/domain-model.md`, and the user-edited
+  `docs/spec/product-spec.md` / `docs/spec/technical-spec.md`.
+
+### Questions asked & answers
+1. Meaning of "URL for the schema" on the tenant table → **Tenant
+   subdomain/portal URL** (not per-tenant DB schema, not JSON-schema URL).
+2. Deliverable scope → **Update `docs/spec/domain-model.md` only** (DDL deferred
+  to /neutron:init).
+
+### Decisions / changes (domain-model.md only)
+- **Organization:** added `slug`, `portal_url` (both unique, not null) and
+  optional `custom_domain`.
+- **User:** replaced `display_name` with `first_name` + `last_name`; made
+  `(tenant_id, email)` composite-unique explicit.
+- **New entities (gap-fill):** RefreshToken (FR-4), WildcardConfig (FR-26),
+  ContestExecutionState (FR-42/NFR-6), QuestionWindow (FR-20/40), OutboxEvent
+  (durable at-least-once channel), Notification (FR-37/41), AuditLog (tech-spec
+  §6). Now five bounded contexts.
+- **Modified entities:** ConfigurationBlock (+`survivor_score_reset`,
+  +`elimination_combine_operator`, dropped SCHEDULED reveal mode);
+  EliminationRule (combine_operator moved to block); Question (dropped
+  `reveal_at`); Registration (+`joined_at`, `spectator_access`, `final_rank`,
+  `final_score`); AnswerSubmission (+`question_window_id`).
+- **Consistency alignment** with user's spec edits: reveal modes now
+  `AUTOMATIC | MODERATOR_CONTROLLED`; elimination combine operator is
+  block-level.
+- Added **§5 Scale & Indexing** (UUID v7, key indexes, hash partitioning of
+  answer_submission/score, RLS note) for the 10,000-concurrent-user target.
+- ERD refreshed; business rules BR-19..BR-24 added; BR-4 updated.
+
+### Outputs produced
+- `docs/spec/domain-model.md` (updated)
+- `docs/session-log.md` (this entry)
+
+---
+
+## 2026-06-22 — API contracts completion (spec only, no implementation)
+
+**Trigger:** User request (professional API developer hat, Python/FastAPI),
+executed via plan mode. Scope explicitly limited to **API contracts only**.
+
+### Artifacts read
+- `ContestForge_PRD_v1.md`, all `docs/spec/*`, prior `api-contracts.yaml`.
+
+### Question asked & answer
+- Participant onboarding model → **Admin-managed, no self-signup.** SQL
+  bootstraps the Super Admin (not in API); Super Admin creates the org + initial
+  Org Admin; Org Admin creates co-Org-Admins, Moderators, Participants via
+  `POST /users` (role ≠ SUPER_ADMIN).
+
+### Work done
+- Rewrote `docs/spec/api-contracts.yaml` to OpenAPI 3.0.3 v1.0.0: **35 path
+  items, 30 schemas**, covering Auth/session, Users, Organizations, Contests,
+  Groups, Configuration, Questions/Options, Registration, Live runtime
+  (reconnect snapshot + moderator controls), Results/Leaderboards/Eliminations/
+  export, Notifications, Audit, and Ops (health/ready).
+- Aligned schemas with current specs: reveal modes `AUTOMATIC |
+  MODERATOR_CONTROLLED` (no SCHEDULED); block-level `elimination_combine_operator`;
+  `survivor_score_reset`; structured `wildcards`; org `slug`/`portal_url`; user
+  `first_name`/`last_name`. Added pagination envelope, standard error model,
+  reusable params/responses.
+- Rewrote `docs/spec/api-contracts.md` companion: per-resource tables, request
+  examples, conventions, the WebSocket live-channel contract, and a
+  capability→endpoint traceability matrix.
+
+### Verification
+- YAML parses; **no dangling `$ref`s and no unused components** (checked via
+  script). Deep `openapi-spec-validator` not installed in env (noted).
+
+### Outputs produced
+- `docs/spec/api-contracts.yaml` (rewritten)
+- `docs/spec/api-contracts.md` (rewritten)
+- `docs/session-log.md` (this entry)
+
+---
+
+## 2026-06-22 — Merge conflict resolution: main → feature/product_spec_fix
+
+**Command:** User merged `main` into `feature/product_spec_fix` and requested
+conflict resolution without spec deviations.
+
+### Conflicts resolved
+- `docs/session-log.md` — kept all three preceding entries in chronological
+  order.
+- `docs/spec/api-contracts.yaml` — kept main's v1.0.0 contract; preserved
+  remediation-aligned values (reveal modes, block-level combine operator,
+  survivor_score_reset, org slug/portal_url).
+- `docs/spec/api-contracts.md` — kept main's rewritten companion; aligned
+  idempotency description with `idempotency_hash`.
+- `docs/spec/domain-model.md` — merged main's structure (five bounded contexts,
+  `first_name`/`last_name`, `portal_url`/`custom_domain`, `WildcardConfig`,
+  `OutboxEvent`, `Notification`, `AuditLog`, `ContestExecutionState`) with
+  remediation hardening (UUIDv7, composite tenant FKs, physical design section,
+  expanded business rules BR-1..BR-27, derived `ParticipantScoreSummary`).
+
+### Post-merge adjustments
+- `Organization.region` removed — v1 uses a single platform region.
+- `.neutron/` added to `.gitignore` per user request (files remain locally).

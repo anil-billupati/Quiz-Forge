@@ -53,6 +53,7 @@ pnpm-lock.yaml
 
 # Claude / AI tooling
 .claude/
+.neutron/
 .codevector.json
 opencode.json
 

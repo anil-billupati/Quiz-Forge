@@ -1,90 +1,176 @@
 # ContestForge — API Contracts (Companion)
 
-Human-readable companion to `api-contracts.yaml` (OpenAPI 3.0.3). All
-tenant-scoped endpoints require a JWT bearer token; the token's claims carry
-the caller's `role` and `tenant_id`. Cross-tenant access is rejected with `403`.
+Human-readable companion to `api-contracts.yaml` (OpenAPI 3.0.3, v1.0.0). The
+YAML is the source of truth; this document summarises each resource, gives
+examples, states the conventions, and documents the WebSocket live channel
+(which is not expressible in OpenAPI).
 
 Base URL (placeholder): `https://api.contestforge.example/v1`
 
 ---
 
-## Authentication
+## Conventions
 
-All users (Super Admin, Org Admin, Moderator, Participant) authenticate with
-email + password and receive a JWT access/refresh token pair. The access token
-is short-lived (~15 min); the refresh token rotates.
+### Authentication & roles
+Every endpoint requires a JWT bearer token **except** `POST /auth/login`,
+`POST /auth/refresh`, `GET /health`, and `GET /ready`. The token's claims carry
+the caller's `role` and `tenant_id`. Roles: `SUPER_ADMIN`, `ORG_ADMIN`,
+`MODERATOR`, `PARTICIPANT`. Cross-tenant access is rejected with `403`.
 
-### POST /auth/login
+**Onboarding chain (no public self-signup):**
+1. The first **Super Admin** is created by an SQL bootstrap script — *not*
+   exposed in the API.
+2. The Super Admin creates an organization via `POST /organizations`, which
+   provisions that tenant's initial **Org Admin**.
+3. An **Org Admin** creates co-Org-Admins, Moderators, and Participants via
+   `POST /users`. `POST /users` rejects `role = SUPER_ADMIN`.
+
+### Error model
+All errors share one shape:
 ```json
-// request
-{ "email": "admin@acme.test", "password": "••••••••", "tenant_slug": "acme" }
-
-// 200
-{
-  "access_token": "eyJ...",
-  "refresh_token": "eyJ...",
-  "token_type": "bearer",
-  "expires_in": 900,
-  "role": "ORG_ADMIN"
-}
+{ "error": { "code": "CONFLICT_INVALID_TRANSITION",
+             "message": "Cannot edit configuration after Registration Open.",
+             "details": { "current_status": "REGISTRATION_OPEN" } } }
 ```
 
-### POST /auth/refresh
-Exchanges a valid refresh token for a fresh token pair. Returns `401` if the
-refresh token is invalid/expired.
+| Status | Meaning |
+|---|---|
+| 200 / 201 / 204 | Success / created / no content |
+| 202 | Accepted (async live-control commands) |
+| 400 | Malformed request (schema/parse error) |
+| 401 | Missing/invalid token |
+| 403 | Role or tenant not permitted |
+| 404 | Resource not found in caller's tenant |
+| 409 | Invalid state transition / precondition failure |
+| 422 | Semantic validation (e.g. ELIMINATION block missing rules) |
+| 503 | Not ready (readiness probe) |
+
+### Pagination
+List endpoints accept `limit` (1–200, default 50) and an opaque `cursor`, and
+return a `Page` envelope:
+```json
+{ "items": [ ... ], "next_cursor": "eyJ...", "has_more": true }
+```
 
 ---
 
-## Organizations (Super Admin only)
+## Auth & Session
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/organizations` | Create a tenant; provisions the initial Org Admin. |
-| GET | `/organizations` | List all tenants. |
-| PATCH | `/organizations/{orgId}/status` | Suspend / reactivate a tenant. |
+| POST | `/auth/login` | Authenticate; returns access/refresh tokens. |
+| POST | `/auth/refresh` | Rotate the refresh token for a new pair. |
+| POST | `/auth/logout` | Revoke the presented refresh token (and rotation chain). |
+| GET | `/auth/me` | Current authenticated principal. |
+| POST | `/auth/change-password` | Change the caller's password. |
 
 ```json
-// POST /organizations  (201)
-{ "slug": "acme-university", "name": "Acme University",
-  "admin_email": "lead@acme.test", "admin_display_name": "Acme Lead" }
+// POST /auth/login
+{ "email": "admin@acme.test", "password": "••••••••", "tenant_slug": "acme" }
+// 200
+{ "access_token": "eyJ...", "refresh_token": "eyJ...", "token_type": "bearer",
+  "expires_in": 900, "role": "ORG_ADMIN" }
 ```
-Authorization: a token without role `SUPER_ADMIN` is rejected with `403`.
+Refresh tokens rotate: each `/auth/refresh` revokes the used token and issues a
+new one (domain rule BR-20). `/auth/logout` revokes immediately.
 
 ---
 
-## Contests (Org Admin)
+## Users (Org Admin)
+
+| Method | Path | Description |
+|---|---|---|
+| POST | `/users` | Create a tenant user (`ORG_ADMIN | MODERATOR | PARTICIPANT`). |
+| GET | `/users` | List/filter by `role`, `status` (paginated). |
+| GET | `/users/{userId}` | Get a user. |
+| PATCH | `/users/{userId}` | Update first/last name or status. |
+
+```json
+// POST /users (201)
+{ "email": "ravi@acme.test", "first_name": "Ravi", "last_name": "Kumar",
+  "role": "PARTICIPANT" }
+```
+`role = SUPER_ADMIN` → `422`. Duplicate email within the tenant → `409`.
+
+---
+
+## Organizations (Super Admin)
+
+| Method | Path | Description |
+|---|---|---|
+| POST | `/organizations` | Create a tenant + initial Org Admin. |
+| GET | `/organizations` | List tenants (paginated). |
+| GET | `/organizations/{orgId}` | Get a tenant. |
+| PATCH | `/organizations/{orgId}` | Update `name`, `custom_domain`. |
+| PATCH | `/organizations/{orgId}/status` | Suspend / reactivate. |
+
+```json
+// POST /organizations (201)
+{ "name": "Acme University", "slug": "acme",
+  "portal_url": "https://acme.contestforge.com",
+  "admin_email": "lead@acme.test", "admin_first_name": "Asha",
+  "admin_last_name": "Rao" }
+```
+`slug` and `portal_url` are unique platform-wide and **immutable** once the
+tenant publishes its first contest (BR-19) — `PATCH /organizations/{orgId}` does
+not accept them. Conflicts on `slug`/`portal_url`/`custom_domain` → `409`.
+
+---
+
+## Contests & Lifecycle (Org Admin)
 
 | Method | Path | Description | Notes |
 |---|---|---|---|
-| POST | `/contests` | Create a contest in Draft. | `structure` locks at Published. |
-| GET | `/contests` | List contests in caller's tenant. | `?status=` filter. |
-| GET | `/contests/{id}` | Get contest with groups + configuration. | |
+| POST | `/contests` | Create in Draft. | `structure` locks at Published. |
+| GET | `/contests` | List in tenant. | `?status=` filter, paginated. |
+| GET | `/contests/{id}` | Detail (groups + configuration). | |
 | PATCH | `/contests/{id}` | Update metadata. | `409` if not Draft. |
+| DELETE | `/contests/{id}` | Delete. | Draft only, else `409`. |
+| POST | `/contests/{id}/lifecycle` | Advance one stage. | See below. |
 
 ```json
-// POST /contests  (201)
+// POST /contests (201)
 { "name": "Fresher Hiring Challenge", "structure": "GROUPED",
   "group_score_rollup": "SUM" }
+
+// POST /contests/{id}/lifecycle
+{ "target_status": "SCHEDULED", "scheduled_start_at": "2026-07-01T10:00:00Z" }
 ```
+Lifecycle is fixed and non-skippable:
+`DRAFT → PUBLISHED → REGISTRATION_OPEN → REGISTRATION_CLOSED → SCHEDULED → LIVE
+→ COMPLETED → ARCHIVED`. Illegal transitions / unmet preconditions → `409`.
+`SCHEDULED` requires `scheduled_start_at`.
 
 ---
 
-## Groups & Configuration
+## Groups (Grouped contests, Draft)
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/contests/{id}/groups` | Add a group (Grouped, Draft only). |
-| PUT | `/contests/{id}/configuration` | Set the Configuration Block (Normal: contest scope; Grouped: include `group_id`). Editable until Registration Open. |
+| POST | `/contests/{id}/groups` | Add a group. |
+| GET | `/contests/{id}/groups` | List groups. |
+| PATCH | `/contests/{id}/groups/{groupId}` | Update name/sequence/weight. |
+| DELETE | `/contests/{id}/groups/{groupId}` | Delete group. |
 
-The Configuration Block is the heart of the system. `mode` determines the
-scoring model — `STANDARD`/`ELIMINATION` use fixed scoring fields
+---
+
+## Configuration
+
+| Method | Path | Description |
+|---|---|---|
+| PUT | `/contests/{id}/configuration` | Set a Configuration Block. Editable until Registration Open. |
+| GET | `/contests/{id}/configuration` | Return block(s): one for Normal, one per group for Grouped. |
+
+The Configuration Block is the core of the system. **`mode` determines the
+scoring model** — `STANDARD`/`ELIMINATION` use the fixed-scoring fields
 (`correct_points`, `wrong_points`, `second_chance_rate`); `SPEED` uses
-`time_bands` or `decay`. `elimination_rules` and `checkpoints` are required when
-`mode = ELIMINATION` and ignored otherwise. Submitting elimination config for a
-non-elimination block, or omitting it for an elimination block, returns `409`.
+`time_bands` or `decay`. Reveal modes are `AUTOMATIC | MODERATOR_CONTROLLED`.
+For `ELIMINATION`, `elimination_rules`, `checkpoints`, and a block-level
+`elimination_combine_operator` (`AND`/`OR`) are required; supplying them on a
+non-elimination block, or omitting them on an elimination block, → `422`.
 
 ```json
-// PUT /contests/{id}/configuration  — Speed group example
+// PUT /contests/{id}/configuration — Speed group
 {
   "group_id": "b2c3...",
   "mode": "SPEED",
@@ -111,14 +197,16 @@ non-elimination block, or omitting it for an elimination block, returns `409`.
 ```
 
 ```json
-// Elimination group example (excerpt)
+// Elimination group (excerpt)
 {
   "group_id": "c3d4...",
   "mode": "ELIMINATION",
   "question_duration_s": 90,
   "ranking_criterion": "SCORE_ONLY",
+  "elimination_combine_operator": "OR",
+  "survivor_score_reset": false,
   "elimination_rules": [
-    { "type": "BOTTOM_X_PERCENT", "percent_value": 50, "combine_operator": "OR" }
+    { "type": "BOTTOM_X_PERCENT", "percent_value": 50 }
   ],
   "checkpoints": [ { "type": "AFTER_GROUP" } ]
 }
@@ -126,37 +214,27 @@ non-elimination block, or omitting it for an elimination block, returns `409`.
 
 ---
 
-## Questions (Org Admin, Draft only)
+## Questions & Options (Draft)
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/contests/{id}/questions` | Add a question with ≥2 options (exactly one correct). |
-| GET | `/contests/{id}/questions` | List questions (admin view includes correctness). |
+| POST | `/contests/{id}/questions` | Add a question (≥2 options, exactly one correct). |
+| GET | `/contests/{id}/questions` | List (admin view incl. correctness); `?group_id=`. |
+| GET | `/contests/{id}/questions/{qid}` | Get one. |
+| PATCH | `/contests/{id}/questions/{qid}` | Update text/explanation/sequence/group. |
+| DELETE | `/contests/{id}/questions/{qid}` | Delete. |
+| PUT | `/contests/{id}/questions/{qid}/options` | Replace the full option set. |
 
 ```json
-// POST  (201)
+// POST /contests/{id}/questions (201)
 { "group_id": "b2c3...", "sequence": 1, "text": "What is 2+2?",
   "explanation": "Basic arithmetic.",
   "options": [ { "text": "3", "is_correct": false },
                { "text": "4", "is_correct": true } ] }
 ```
-
-> Participant-facing question payloads (delivered over WebSocket at reveal) omit
-> `is_correct` and `explanation` until the evaluation/explanation phase.
-
----
-
-## Lifecycle
-
-### POST /contests/{id}/lifecycle
-Advances the contest one stage along the fixed sequence:
-`DRAFT → PUBLISHED → REGISTRATION_OPEN → REGISTRATION_CLOSED → SCHEDULED → LIVE
-→ COMPLETED → ARCHIVED`. Skipping a stage or failing preconditions returns
-`409`. `SCHEDULED` requires `scheduled_start_at`.
-
-```json
-{ "target_status": "SCHEDULED", "scheduled_start_at": "2026-07-01T10:00:00Z" }
-```
+> Participant-facing question payloads (delivered over WebSocket at reveal, and
+> in `GET /contests/{id}/live-state`) omit `is_correct` and `explanation` until
+> the evaluation/explanation phase.
 
 ---
 
@@ -164,26 +242,76 @@ Advances the contest one stage along the fixed sequence:
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/contests/{id}/registrations` | Participant self-registers (Registration Open only; `409` otherwise or if already registered). |
-| GET | `/contests/{id}/registrations` | Org Admin / Moderator list registrations. |
+| POST | `/contests/{id}/registrations` | Participant self-registers (Registration Open; `409` otherwise/duplicate). |
+| GET | `/contests/{id}/registrations` | Org Admin / Moderator list (paginated, `?status=`). |
+| GET | `/contests/{id}/registrations/me` | Caller's own registration. |
+| DELETE | `/contests/{id}/registrations/{registrationId}` | Withdraw (self before close, or Org Admin). |
+
+A `Registration` carries `status`, `spectator_access`, and (after completion)
+`final_rank` / `final_score`.
 
 ---
 
-## Results & Leaderboards
+## Live runtime (REST complements the WebSocket channel)
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/contests/{id}/leaderboard` | Snapshot of a leaderboard view (`?view=CONTEST\|GROUP\|SURVIVOR`, optional `group_id`). Live updates come over WebSocket; this is a REST fallback/snapshot. |
+| GET | `/contests/{id}/live-state` | Participant reconnect snapshot (FR-43): current question without correctness, authoritative `submission_close_at`, caller status/score. `409` if not Live. |
+| POST | `/contests/{id}/control/reveal` | **Moderator**: manually reveal current/next question (Moderator-Controlled mode). `202`. |
+| POST | `/contests/{id}/control/advance` | **Moderator**: override progression (`scope: QUESTION | GROUP`). `202`. |
+
+Real-time delivery and answer submission happen over WebSocket (below). These
+REST endpoints exist for reconnection recovery and moderator console actions.
+
+---
+
+## Results, Leaderboards & Eliminations
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/contests/{id}/leaderboard` | Snapshot; `?view=CONTEST\|GROUP\|SURVIVOR`, optional `group_id`. REST fallback for the live WS push. |
 | GET | `/contests/{id}/results` | Final results + per-participant breakdown (Completed/Archived). |
-| GET | `/contests/{id}/wildcard-audit` | Wildcard activation audit log (Org Admin). |
+| GET | `/contests/{id}/results/export` | Export results; `?format=csv\|json`. |
+| GET | `/contests/{id}/eliminations` | Elimination events (Org Admin / Moderator). |
+| GET | `/contests/{id}/wildcard-audit` | Wildcard activation audit (Org Admin). |
+
+---
+
+## Notifications (participant)
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/me/notifications` | List caller's notifications; `?unread_only=`, paginated. |
+| POST | `/me/notifications/{notificationId}/ack` | Mark delivered/read. |
+
+Notification `type` ∈ `ELIMINATION | ANSWER_ACK | SPECTATOR_GRANTED |
+CONTEST_PROGRESS`; `payload` carries type-specific data (e.g. final rank/score
+for `ELIMINATION`).
+
+---
+
+## Audit
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/audit` | Query the audit log. Org Admin = tenant-scoped; Super Admin = platform-wide. Filters: `entity_type`, `action`, `actor_user_id`, `from`, `to`; paginated. |
+
+---
+
+## Ops
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/health` | Liveness (unauthenticated). |
+| GET | `/ready` | Readiness incl. DB/Redis dependency checks; `503` if not ready. |
 
 ---
 
 ## WebSocket Channel (live contest)
 
-REST covers authoring and results; the live contest runs over a WebSocket
-connection. The transport contract (finalized in implementation) is summarized
-here so frontend and backend agree.
+REST covers authoring, administration, and results. The live contest runs over
+a WebSocket connection; the contract is documented here so frontend and backend
+agree (it is not part of the OpenAPI document).
 
 **Connect:** `wss://api.contestforge.example/v1/contests/{contestId}/live`
 with the JWT supplied as a connection token (subprotocol or query token). The
@@ -193,42 +321,47 @@ server validates role, tenant, and an active Registration.
 
 | Event | Payload (summary) | When |
 |---|---|---|
-| `question.reveal` | question id, text, options (no correctness), server close time | At reveal (≤200ms fan-out). |
-| `answer.ack` | submission id, accepted (bool), reason | After a submission is durably accepted/rejected. |
+| `question.reveal` | question id, sequence, text, options (no correctness), `submission_close_at` | At reveal (≤200ms fan-out, NFR-1). |
+| `answer.ack` | submission id, `attempt_no`, accepted (bool), reason | After a submission is durably accepted/rejected (FR-41). |
 | `question.evaluation` | correct option id, explanation | After the submission window closes. |
 | `leaderboard.update` | view, ranked entries (delta or snapshot) | Per configured `update_frequency`. |
 | `elimination.event` | participant id, final rank/score, spectator flag | At a checkpoint. |
-| `contest.progress` | current group/question, lifecycle/live state | On group/question advance. |
+| `contest.progress` | current group/question, phase | On group/question advance. |
 
 **Client → server actions**
 
 | Action | Payload | Rules |
 |---|---|---|
-| `answer.submit` | question id, selected option id, attempt_no | Rejected if past server-side close time (`reason: window_closed`) or participant eliminated. Server timestamp is authoritative; idempotency is derived server-side. |
-| `wildcard.activate` | type, question id | Subject to enabled set, usage limit, eligibility, cooldown; Fifty-Fifty rejected after an answer is selected. |
-| `moderator.reveal` | question id | Moderator only; Moderator-Controlled reveal mode. |
-| `moderator.advance` | group/question target | Moderator override of progression. |
+| `answer.submit` | question id, selected option id, `attempt_no` | Rejected if past server-side `submission_close_at` (`reason: window_closed`, FR-20) or participant eliminated. Server timestamp is authoritative (FR-40). |
+| `wildcard.activate` | type, question id | Subject to enabled set, usage limit, eligibility, cooldown; Fifty-Fifty rejected after an answer is selected (FR-23/26). |
+| `moderator.reveal` | question id | Moderator only; Moderator-Controlled mode (mirrors `POST /control/reveal`). |
+| `moderator.advance` | scope (QUESTION/GROUP) | Moderator override (mirrors `POST /control/advance`). |
 
-**Durability/ack semantics:** an `answer.submit` is acknowledged only after the
-answer is durably persisted with its server-accept timestamp. A deterministic
-server-side idempotency hash (`contest|question|participant|attempt`) ensures
-retries are not double-counted. A delayed ack does not revoke an
-already-accepted answer.
+**Durability / ack semantics:** an `answer.submit` is acknowledged only after
+the answer is durably persisted with its server-accept timestamp against the
+authoritative `QuestionWindow`. The server computes a deterministic
+`idempotency_hash` from `(contest_id|question_id|participant_id|attempt_no)`;
+this hash is the deduplication key, so retries are not double-counted even
+without a client-provided idempotency key (FR-39). A delayed ack does not
+revoke an already-accepted answer (FR-41).
 
 ---
 
-## Common Error Shape
+## Traceability (capabilities → endpoints)
 
-```json
-{ "error": { "code": "CONFLICT_INVALID_TRANSITION",
-             "message": "Cannot edit configuration after Registration Open.",
-             "details": { "current_status": "REGISTRATION_OPEN" } } }
-```
-
-| Status | Meaning |
+| PRD / FR capability | Covered by |
 |---|---|
-| 400 | Validation error (schema/range). |
-| 401 | Missing/invalid token. |
-| 403 | Role or tenant not permitted. |
-| 404 | Resource not found in caller's tenant. |
-| 409 | Invalid state transition / precondition failure. |
+| Tenancy, org create/suspend (FR-1/2) | `/organizations*` |
+| Identity, JWT, roles (FR-4/5) | `/auth/*`, `/users*` |
+| Tenant isolation (FR-3) | enforced cross-cutting; `403` on every tenant-scoped path |
+| Contest model & lifecycle (FR-6–9) | `/contests*`, `/contests/{id}/lifecycle` |
+| Configuration block, modes, scoring (FR-10–16) | `/contests/{id}/configuration`, `ConfigurationBlock` schema |
+| Execution, reveal, progression (FR-17–21) | WebSocket channel, `/control/*`, `/live-state` |
+| Wildcards (FR-22–27) | `WildcardConfig` in config; WS `wildcard.activate`; `/wildcard-audit` |
+| Leaderboards (FR-28–32) | `/leaderboard`, WS `leaderboard.update` |
+| Elimination (FR-33–37) | elimination config; `/eliminations`; WS `elimination.event` |
+| Durability/recovery (FR-38–44) | WS ack semantics, `/live-state`, idempotency keys |
+| Notifications (FR-37/41) | `/me/notifications*`, WS events |
+| Audit (tech-spec §6) | `/audit`, `/wildcard-audit` |
+| Results & export | `/results`, `/results/export` |
+| Ops/observability | `/health`, `/ready` |
