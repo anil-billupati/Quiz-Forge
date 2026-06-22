@@ -84,13 +84,14 @@ new one (domain rule BR-20). `/auth/logout` revokes immediately.
 | GET | `/users` | List/filter by `role`, `status` (paginated). |
 | GET | `/users/{userId}` | Get a user. |
 | PATCH | `/users/{userId}` | Update first/last name or status. |
+| POST | `/super-admins` | Create a new Super Admin (Super Admin only). |
 
 ```json
 // POST /users (201)
 { "email": "ravi@acme.test", "first_name": "Ravi", "last_name": "Kumar",
   "role": "PARTICIPANT" }
 ```
-`role = SUPER_ADMIN` → `422`. Duplicate email within the tenant → `409`.
+`role = SUPER_ADMIN` is rejected by `POST /users`; use `POST /super-admins` instead. Duplicate email within the tenant → `409`.
 
 ---
 
@@ -103,6 +104,9 @@ new one (domain rule BR-20). `/auth/logout` revokes immediately.
 | GET | `/organizations/{orgId}` | Get a tenant. |
 | PATCH | `/organizations/{orgId}` | Update `name`, `custom_domain`. |
 | PATCH | `/organizations/{orgId}/status` | Suspend / reactivate. |
+| GET | `/organizations/{orgId}/settings` | Get tenant resource limits. |
+| PATCH | `/organizations/{orgId}/settings` | Update tenant resource limits. |
+| GET | `/organizations/{orgId}/usage` | Get tenant usage aggregates. |
 
 ```json
 // POST /organizations (201)
@@ -332,17 +336,18 @@ server validates role, tenant, and an active Registration.
 
 | Action | Payload | Rules |
 |---|---|---|
-| `answer.submit` | question id, selected option id, `attempt_no`, client idempotency key | Rejected if past server-side `submission_close_at` (`reason: window_closed`, FR-20) or participant eliminated. Server timestamp is authoritative (FR-40). |
+| `answer.submit` | question id, selected option id, `attempt_no` | Rejected if past server-side `submission_close_at` (`reason: window_closed`, FR-20) or participant eliminated. Server timestamp is authoritative (FR-40). |
 | `wildcard.activate` | type, question id | Subject to enabled set, usage limit, eligibility, cooldown; Fifty-Fifty rejected after an answer is selected (FR-23/26). |
 | `moderator.reveal` | question id | Moderator only; Moderator-Controlled mode (mirrors `POST /control/reveal`). |
 | `moderator.advance` | scope (QUESTION/GROUP) | Moderator override (mirrors `POST /control/advance`). |
 
 **Durability / ack semantics:** an `answer.submit` is acknowledged only after
 the answer is durably persisted with its server-accept timestamp against the
-authoritative `QuestionWindow`. The client idempotency key plus the server-side
-`(contest, question, participant, attempt_no)` key ensure retries are not
-double-counted (FR-39). A delayed ack does not revoke an already-accepted
-answer (FR-41).
+authoritative `QuestionWindow`. The server computes a deterministic
+`idempotency_hash` from `(contest_id|question_id|participant_id|attempt_no)`;
+this hash is the deduplication key, so retries are not double-counted even
+without a client-provided idempotency key (FR-39). A delayed ack does not
+revoke an already-accepted answer (FR-41).
 
 ---
 

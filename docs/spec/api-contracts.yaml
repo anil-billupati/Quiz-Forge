@@ -217,6 +217,29 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /super-admins:
+    post:
+      tags: [Users]
+      summary: Create a new Super Admin. Existing Super Admin only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateSuperAdminRequest' }
+      responses:
+        '201':
+          description: Super Admin created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: Email already exists for a Super Admin
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
   # ───────────────────────────── Organizations ─────────────────────────────
   /organizations:
     post:
@@ -327,6 +350,56 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Organization' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /organizations/{orgId}/settings:
+    parameters:
+      - { $ref: '#/components/parameters/OrgId' }
+    get:
+      tags: [Organizations]
+      summary: Get tenant settings (resource limits). Super Admin only.
+      responses:
+        '200':
+          description: Tenant settings
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantSettings' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Organizations]
+      summary: Update tenant settings (resource limits). Super Admin only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TenantSettingsPatch' }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantSettings' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /organizations/{orgId}/usage:
+    get:
+      tags: [Organizations]
+      summary: Get tenant usage aggregates. Super Admin only.
+      parameters:
+        - { $ref: '#/components/parameters/OrgId' }
+        - in: query
+          name: period
+          schema: { type: string, format: date, example: '2026-06' }
+          description: Aggregate period (month); omit for current period
+      responses:
+        '200':
+          description: Tenant usage
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantUsageRecord' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
@@ -1103,11 +1176,20 @@ components:
         role:
           type: string
           enum: [ORG_ADMIN, MODERATOR, PARTICIPANT]
-          description: SUPER_ADMIN is not allowed (bootstrapped via SQL only)
+          description: SUPER_ADMIN is not allowed here; use POST /super-admins
         password:
           type: string
           format: password
           description: Optional; if omitted, an invite/temporary credential flow is used
+
+    CreateSuperAdminRequest:
+      type: object
+      required: [email, first_name, last_name, password]
+      properties:
+        email: { type: string, format: email }
+        first_name: { type: string }
+        last_name: { type: string }
+        password: { type: string, format: password, minLength: 8 }
 
     Organization:
       type: object
@@ -1127,13 +1209,45 @@ components:
         name: { type: string }
         slug:
           type: string
-          pattern: '^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$'
-          description: Unique tenant key / subdomain label
+          pattern: '^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$'
+          description: Unique tenant key / subdomain label (3-64 chars)
         portal_url: { type: string, format: uri }
         custom_domain: { type: string, nullable: true }
         admin_email: { type: string, format: email }
         admin_first_name: { type: string }
         admin_last_name: { type: string }
+
+    TenantSettings:
+      type: object
+      properties:
+        max_concurrent_live_contests: { type: integer, default: 5 }
+        max_participants_per_contest: { type: integer, default: 10000 }
+        max_questions_per_contest: { type: integer, default: 200 }
+        default_negative_marking: { type: boolean, default: false }
+        updated_at: { type: string, format: date-time }
+
+    TenantSettingsPatch:
+      type: object
+      minProperties: 1
+      properties:
+        max_concurrent_live_contests: { type: integer }
+        max_participants_per_contest: { type: integer }
+        max_questions_per_contest: { type: integer }
+        default_negative_marking: { type: boolean }
+
+    TenantUsageRecord:
+      type: object
+      properties:
+        period_start: { type: string, format: date-time }
+        period_end: { type: string, format: date-time }
+        contests_created: { type: integer }
+        live_contest_peak: { type: integer }
+        participant_minutes: { type: integer, format: int64 }
+        questions_created: { type: integer }
+        answer_submissions: { type: integer }
+        wildcard_activations: { type: integer }
+        storage_bytes: { type: integer, format: int64 }
+        updated_at: { type: string, format: date-time }
 
     LifecycleStatus:
       type: string
@@ -1404,6 +1518,7 @@ components:
         score: { type: integer }
         total_time_ms: { type: integer }
         wrong_count: { type: integer }
+        last_correct_at: { type: string, format: date-time, nullable: true }
 
     ContestResults:
       type: object
@@ -1443,13 +1558,33 @@ components:
         question_id: { type: string, format: uuid }
         type: { type: string, enum: [FIFTY_FIFTY, SECOND_CHANCE, SKIP] }
         activated_at: { type: string, format: date-time }
-        outcome: { type: string }
+        outcome: { type: object, additionalProperties: true }
+
+    AnswerSubmission:
+      type: object
+      description: Durable answer record. Duplicate retries are rejected by a deterministic server-side idempotency hash.
+      properties:
+        id: { type: string, format: uuid }
+        question_window_id: { type: string, format: uuid }
+        participant_id: { type: string, format: uuid }
+        attempt_no: { type: integer, description: '1 = first attempt, 2 = Second Chance' }
+        selected_option_id: { type: string, format: uuid, nullable: true }
+        server_accepted_at: { type: string, format: date-time }
+        response_time_ms: { type: integer }
+        outcome:
+          type: string
+          enum: [CORRECT, WRONG, TIMEOUT, SKIPPED]
+        idempotency_hash:
+          type: string
+          format: uuid
+          description: Deterministic server-side UUID hash of contest|question|participant|attempt.
+        scored: { type: boolean, default: false }
 
     Notification:
       type: object
       properties:
         id: { type: string, format: uuid }
-        contest_id: { type: string, format: uuid, nullable: true }
+        contest_id: { type: string, format: uuid }
         type:
           type: string
           enum: [ELIMINATION, ANSWER_ACK, SPECTATOR_GRANTED, CONTEST_PROGRESS]

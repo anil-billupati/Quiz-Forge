@@ -110,13 +110,14 @@ No external third-party APIs identified at kickoff.
 
 ## 7. Compliance Requirements
 
-**None stated.**
+**Baseline:** SOC 2 Type II and GDPR readiness required.
 
-> **Open question:** ContestForge is a multi-tenant SaaS holding participant
-> personal data and is classified Confidential. Compliance regimes such as
-> SOC 2 and GDPR are commonly required for this profile. Recorded as "none"
-> per current input; to be confirmed with stakeholders before architecture
-> finalisation in /neutron:plan.
+> The platform holds participant personal data (`email`, `display_name`),
+> behavioural data (answers, scores, response times), and audit logs across
+> multiple tenants. The baseline requires encryption at rest and in transit,
+> access logging, audit trails, data retention/deletion policies, and a defined
+> region/residency strategy. Full certification scope to be confirmed with
+> stakeholders before production launch.
 
 ---
 
@@ -130,13 +131,15 @@ No external third-party APIs identified at kickoff.
 
 ## 9. Open Questions
 
-1. **Compliance** — Confirm whether SOC 2 / GDPR (or other regimes) apply
-   given multi-tenant participant data. Currently recorded as "none".
+1. **Compliance** — Baseline set to SOC 2 Type II and GDPR readiness; full
+   certification scope to be confirmed before production launch.
 2. **Timeline** — No delivery dates or milestones provided.
 3. **Budget** — Not specified.
-4. **Tenant isolation strategy** — Shared-schema-with-tenant-id vs.
-   schema-per-tenant vs. database-per-tenant; to be decided in /neutron:plan.
+4. **Tenant isolation strategy** — Shared schema + `tenant_id` with row-level
+   enforcement; final infra to be confirmed in /neutron:plan.
 5. **AWS region(s) and environments** — To be determined in /neutron:plan.
+6. **Notification transport** — In-app WebSocket events for v1; email/SMS/webhooks
+   deferred.
 
 ---
 
