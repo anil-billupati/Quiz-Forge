@@ -273,3 +273,32 @@ conflict resolution without spec deviations.
 ### Post-merge adjustments
 - `Organization.region` removed — v1 uses a single platform region.
 - `.neutron/` added to `.gitignore` per user request (files remain locally).
+
+---
+
+## 2026-06-22 — API contract alignment fixes
+
+**Command:** User asked whether API contracts were up to date with PRD, product
+spec, and technical spec.
+
+### Discrepancies found and fixed
+- `Organization.slug` regex capped at 40 chars while domain model allowed 3–64
+  → updated regex to `{1,62}` (3–64 chars total).
+- Missing Super Admin creation path (technical spec requires existing Super Admin
+  can create another) → added `POST /super-admins` and `CreateSuperAdminRequest`.
+- Missing `TenantSettings` endpoints required by FR-3a → added
+  `GET/PATCH /organizations/{orgId}/settings`.
+- Missing `TenantUsageRecord` endpoint required by FR-3b → added
+  `GET /organizations/{orgId}/usage`.
+- `Notification.contest_id` nullable in API but non-nullable in domain model →
+  removed `nullable: true`.
+- `WildcardActivation.outcome` typed as string in API but JSONB in domain model
+  → changed to `object`.
+- `LeaderboardEntry` omitted `last_correct_at` → added it.
+- `slug`/`portal_url` immutability rule in `api-contracts.md` was not grounded
+  in domain model → added immutability clause to BR-19.
+
+### Outputs produced
+- Updated `docs/spec/api-contracts.yaml`
+- Updated `docs/spec/api-contracts.md`
+- Updated `docs/spec/domain-model.md` (BR-19)

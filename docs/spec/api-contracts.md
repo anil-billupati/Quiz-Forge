@@ -84,13 +84,14 @@ new one (domain rule BR-20). `/auth/logout` revokes immediately.
 | GET | `/users` | List/filter by `role`, `status` (paginated). |
 | GET | `/users/{userId}` | Get a user. |
 | PATCH | `/users/{userId}` | Update first/last name or status. |
+| POST | `/super-admins` | Create a new Super Admin (Super Admin only). |
 
 ```json
 // POST /users (201)
 { "email": "ravi@acme.test", "first_name": "Ravi", "last_name": "Kumar",
   "role": "PARTICIPANT" }
 ```
-`role = SUPER_ADMIN` → `422`. Duplicate email within the tenant → `409`.
+`role = SUPER_ADMIN` is rejected by `POST /users`; use `POST /super-admins` instead. Duplicate email within the tenant → `409`.
 
 ---
 
@@ -103,6 +104,9 @@ new one (domain rule BR-20). `/auth/logout` revokes immediately.
 | GET | `/organizations/{orgId}` | Get a tenant. |
 | PATCH | `/organizations/{orgId}` | Update `name`, `custom_domain`. |
 | PATCH | `/organizations/{orgId}/status` | Suspend / reactivate. |
+| GET | `/organizations/{orgId}/settings` | Get tenant resource limits. |
+| PATCH | `/organizations/{orgId}/settings` | Update tenant resource limits. |
+| GET | `/organizations/{orgId}/usage` | Get tenant usage aggregates. |
 
 ```json
 // POST /organizations (201)

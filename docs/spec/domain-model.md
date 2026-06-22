@@ -929,9 +929,10 @@ erDiagram
   authoritative `Score` rows on cache loss without affecting scores or ranks.
   (FR-44)
 - **BR-19 (Tenant identity & email uniqueness):** `Organization.slug` and
-  `portal_url` are unique platform-wide; `custom_domain`, if set, is also unique.
-  `User.email` is unique within a tenant, and `SUPER_ADMIN` emails are unique
-  platform-wide. (FR-1, FR-4)
+  `portal_url` are unique platform-wide and immutable once the tenant publishes
+  its first contest; `custom_domain`, if set, is also unique. `User.email` is
+  unique within a tenant, and `SUPER_ADMIN` emails are unique platform-wide.
+  (FR-1, FR-4)
 - **BR-20 (Configuration scope invariant):** A ConfigurationBlock has exactly one
   of (`contest_id`, `group_id`). (FR-8)
 - **BR-21 (Exactly one correct option):** Each Question has exactly one Option
