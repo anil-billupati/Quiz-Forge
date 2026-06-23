@@ -1,0 +1,21 @@
+name: Deploy
+
+# Deploy pipeline skeleton. Build + push container images on merge to main.
+# Concrete provisioning/target is supplied at infra time (ADR-003); this is a
+# placeholder wired to the platform-agnostic container build.
+
+on:
+  push:
+    branches: ["main"]
+
+jobs:
+  build-images:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build backend image
+        run: docker build -t contestforge-backend:${{ github.sha }} ./backend
+      - name: Build frontend image
+        run: docker build -t contestforge-frontend:${{ github.sha }} ./frontend
+      # TODO: push to registry and trigger deploy once the target platform is
+      # chosen at provisioning time (see infra.yaml / ADR-003).

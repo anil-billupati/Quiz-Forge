@@ -302,3 +302,185 @@ spec, and technical spec.
 - Updated `docs/spec/api-contracts.yaml`
 - Updated `docs/spec/api-contracts.md`
 - Updated `docs/spec/domain-model.md` (BR-19)
+
+---
+
+## 2026-06-22 — /neutron:plan (architecture + delivery plan + infra)
+
+**Command:** /neutron:plan
+
+### Artifacts read
+- `docs/kickoff.md`, all `docs/spec/*` (current, user-expanded), `infra.yaml`.
+
+### Questions asked & answers
+1. Compute platform (Fargate vs EKS) → **don't commit; keep deployment-agnostic,
+   horizontally scalable.**
+2. AWS region → **don't pin; flexible, single-region as config.**
+
+### Architectural decisions (ADRs written, accepted)
+- **ADR-001** Shared-schema multi-tenancy (`tenant_id` + scoping mixin + RLS +
+  composite FKs).
+- **ADR-002** Server-authoritative engines + transactional outbox + Redis
+  Streams transport + idempotent at-most-once scoring.
+- **ADR-003** Deployment-agnostic, horizontally scalable stateless services
+  (no committed compute platform/region; state externalized to Postgres/Redis).
+  (Other decisions — FastAPI, Postgres, Redis, WS gateway, JWT, RLS — were
+  already fixed in the specs and only consolidated, not re-decided.)
+
+### Delivery plan
+- **18 units** (several high-complexity flagged for sub-splitting): Foundation →
+  Identity/Tenancy → Authoring (contests/config/questions/registration) →
+  Real-time foundation → Execution → Answer durability → Scoring → {Wildcards,
+  Leaderboard} → Elimination → Notifications → Results/Export → Audit →
+  Resilience/Perf → Frontend (18a admin/authoring, 18b live/participant).
+- Critical path = live engine chain (Units 7→8→9→10→11/12→13); authoring,
+  notifications, audit, and frontend parallelize off-path.
+
+### infra.yaml completed
+- `environments: [dev, staging, production]`; services (api, ws-gateway,
+  engine-workers, web); data-stores (postgresql, redis with purposes);
+  `integrations: []` (in-app WS notifications only); `compute: container /
+  platform-agnostic / horizontal`; `region: us-east-1` as changeable default;
+  `compliance: [soc2-type-ii, gdpr-readiness]`.
+
+### Outputs produced
+- `docs/plan/architecture.md`
+- `docs/plan/delivery-plan.md`
+- `docs/adr/001-shared-schema-multitenancy.md`
+- `docs/adr/002-authoritative-engines-outbox-idempotent-scoring.md`
+- `docs/adr/003-deployment-agnostic-horizontal-scalability.md`
+- `infra.yaml` (completed)
+- `docs/session-log.md` (this entry)
+
+---
+
+## 2026-06-22 — /neutron:init (repository scaffold)
+
+**Command:** /neutron:init
+
+### Artifacts read
+- `docs/kickoff.md`, `docs/plan/architecture.md`, `docs/plan/delivery-plan.md`,
+  `infra.yaml`. No `archetypes/` or `adapters/` templates present → scaffolded
+  from architecture + stack directly (surfaced as a note, proceeded).
+
+### Scaffold created (structural boilerplate only — no business logic)
+- **Backend (Python/FastAPI):** `backend/app/` (`main.py`, `config.py`, `db.py`,
+  `redis_client.py`, `dependencies.py`, `middleware/{logging,tenant_context,
+  errors}.py`, `routers/health.py`, plus `models/ schemas/ services/ workers/
+  utils/` packages); Alembic (`alembic.ini`, `migrations/`); `pyproject.toml`
+  (ruff/pytest/mypy); `requirements.txt`; `Dockerfile`; `.env.example`; tests
+  (`unit/ integration/ fixtures/`, `conftest.py`, health smoke test).
+- **Frontend (Next.js/TS):** `frontend/src/{app,components,hooks,lib,types}`,
+  `package.json`, `tsconfig.json`, `next.config.js`, `Dockerfile`,
+  `.env.example`, `tests/`.
+- **Root:** `README.md`, `CLAUDE.md` (context + ADR summary + delivery-status
+  table), `.neutron/{security,integrations,environment}.md`, `docker-compose.yml`,
+  `.github/workflows/{ci,deploy}.yml`. Added `.ruff_cache/` to existing
+  `.gitignore` (`.neutron/` already ignored).
+
+### Verification
+- All backend Python files parse (AST check) — OK.
+- Ops endpoints (`/health`, `/ready`) implemented as the Unit-1 baseline.
+
+### Next step
+- Begin implementation: `/neutron:feature "Unit 1: Platform foundation"`.
+
+---
+
+## 2026-06-22 — /neutron:feature "Unit 1: Platform foundation"
+
+**Command:** /neutron:feature (Unit 1)
+
+### Spec reference
+- technical-spec §1–2, §6, §7.1; ADR-001 (shared-schema multi-tenancy);
+  ADR-003 (deployment-agnostic); delivery-plan Unit 1.
+
+### Gaps
+- None — scoping mechanism fully specified by ADR-001 + technical-spec §7.1.
+
+### Built (completing the init scaffold)
+- `app/models/base.py` — declarative `Base` + `TenantScoped` mixin (+ `new_uuid`).
+- `app/db.py` — tenant-scoping machinery: `do_orm_execute` filter via
+  `with_loader_criteria` + unscoped-query assertion; `before_flush` auto-stamps
+  `tenant_id` from request context.
+- `app/middleware/tenant_context.py` — `UnscopedQueryError`, context get/set/
+  reset, and `TenantContextMiddleware` (ASGI; JWT population deferred to Unit 2).
+- `app/redis_client.py` — Streams `stream_publish` / `stream_read` helpers.
+- `app/schemas/pagination.py` — generic `Page[T]` envelope.
+- `app/observability/tracing.py` — best-effort OpenTelemetry FastAPI
+  instrumentation; wired in `main.py` alongside the tenant middleware.
+- `app/models/foundation_probe.py` + `migrations/versions/0001_foundation.py` —
+  pgcrypto extension + tenant-scoped probe table + RLS policy scaffold; wired
+  `target_metadata` in `migrations/env.py`.
+- Tests: `tests/unit/test_tenant_scoping.py` (4), `tests/integration/
+  test_foundation_db.py` (testcontainers, marked integration).
+
+### Verification
+- Spun up a Python 3.13 venv, installed minimal deps, ran the scoping unit
+  suite: **4/4 passed** (auto-stamp, tenant filter isolates rows, unscoped
+  query raises, unscoped insert raises). Temp venv removed afterward.
+- All backend Python files AST-parse cleanly.
+
+### Decisions captured (docs/decisions.md, Tier 2)
+- Scoping via SQLAlchemy session hooks (vs per-repo filters / RLS-only).
+- `tenant_id` as `String(36)` in scaffold → UUID + composite FK in Unit 2.
+- **Finding:** RLS policy present but inert until the `app.tenant_id` Postgres
+  GUC is set per transaction — planned for Unit 2 (surfaced, not silently done).
+
+### Status
+- CLAUDE.md delivery table: Unit 1 → ☑ complete. Next: Unit 2 (Tenancy &
+  Identity).
+- Suggest `/neutron:review` before raising a PR.
+
+---
+
+## 2026-06-22 — /neutron:feature "Unit 2: Tenancy & Identity"
+
+**Command:** /neutron:feature (Unit 2)
+
+### Spec reference
+- product-spec FR-1..5, FR-3a/3b, §2.5 role matrix; api-contracts Auth/Users/
+  Organizations; domain-model Organization/TenantSettings/User/RefreshToken/
+  TenantUsageRecord; ADR-001; BR-19, BR-20.
+
+### Gap resolved
+- Initial credentials: **creator sets the password** (no email transport in v1).
+  Contract change: `admin_password` added to org creation; `password` required
+  on `POST /users` (logged in docs/decisions.md).
+
+### Built
+- Models: `organization.py` (Organization + TenantSettings), `user.py`
+  (User + RefreshToken), `tenant_usage.py` (TenantUsageRecord).
+- Security: `security/passwords.py` (argon2), `security/tokens.py` (JWT access +
+  opaque rotating refresh, sha256-hashed, token_family).
+- Dependencies: `Principal`, `get_principal` (sets tenant context from JWT),
+  `require_roles` RBAC (§2.5), `db_session`, pagination params.
+- Services: `auth_service` (login/refresh-rotation+reuse-detection/logout/
+  change-password), `user_service` (create/list/get/update + create_super_admin,
+  tenant-scoped), `organization_service` (org CRUD + status + settings + usage;
+  provisions initial Org Admin + TenantSettings atomically; BR-19 immutability).
+- Routers: `auth`, `organizations` (SUPER_ADMIN), `users` (+ `/super-admins`);
+  registered in `main.py`.
+- `cli.py` — `python -m app.cli seed-superadmin` (env-seeded bootstrap).
+- Migration `0002_tenancy_identity` (tables, uniques, indexes, partial unique
+  index for SUPER_ADMIN email); models registered in `migrations/env.py`.
+- Contract updated: `api-contracts.yaml` + `.md` (admin_password, password
+  required).
+
+### Verification (ran in a temp Python 3.13 venv; removed after)
+- **17/17 passed**: security unit tests (hash, JWT roundtrip/tamper/expiry,
+  refresh hashing) + tenant-scoping unit tests + Unit 2 integration suite
+  (onboarding chain, login→refresh rotation + reuse detection, logout revoke,
+  RBAC 403, cross-tenant user isolation, SUPER_ADMIN role rejected).
+- Found & fixed two real bugs while verifying: missing `email-validator`
+  dependency (added to requirements); naive/aware datetime comparison on refresh
+  expiry (now tz-coerced — works on both Postgres and SQLite).
+- Contract YAML re-validated: 38 paths, 35 schemas, no dangling refs.
+
+### Decisions captured (docs/decisions.md, Tier 2)
+- Creator-set credentials + contract change; User excluded from auto-scoping
+  mixin (scoped explicitly); tz-safe refresh expiry comparison.
+
+### Status
+- CLAUDE.md: Unit 2 → ☑ complete. Next: Unit 3 (Contest authoring).
+- Suggest `/neutron:review` before raising a PR.

@@ -778,6 +778,33 @@ paths:
         '409': { $ref: '#/components/responses/Conflict' }
 
   # ──────────────────────────────── Live runtime ───────────────────────────
+  /contests/{contestId}/live-ticket:
+    parameters:
+      - { $ref: '#/components/parameters/ContestId' }
+    post:
+      tags: [Live]
+      summary: Mint a short-lived, single-use ticket for the WebSocket handshake
+      description: >
+        Authenticated with the normal Authorization: Bearer header. Returns a
+        single-use, short-lived ticket the client presents via the
+        Sec-WebSocket-Protocol header when opening the live socket — so no
+        long-lived token ever appears in a URL. The server validates role,
+        tenant, and an active Registration before issuing.
+      responses:
+        '200':
+          description: Connection ticket
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ticket: { type: string }
+                  expires_in: { type: integer, example: 30 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          $ref: '#/components/responses/Conflict'
+          description: Contest is not Live or caller is not registered
+
   /contests/{contestId}/live-state:
     parameters:
       - { $ref: '#/components/parameters/ContestId' }
@@ -1168,7 +1195,7 @@ components:
 
     CreateUserRequest:
       type: object
-      required: [email, first_name, last_name, role]
+      required: [email, first_name, last_name, role, password]
       properties:
         email: { type: string, format: email }
         first_name: { type: string }
@@ -1180,7 +1207,10 @@ components:
         password:
           type: string
           format: password
-          description: Optional; if omitted, an invite/temporary credential flow is used
+          minLength: 8
+          description: >
+            Set by the creating Org Admin (v1 has no email delivery). The user
+            may change it later via POST /auth/change-password.
 
     CreateSuperAdminRequest:
       type: object
@@ -1204,7 +1234,8 @@ components:
 
     CreateOrganizationRequest:
       type: object
-      required: [name, slug, portal_url, admin_email, admin_first_name, admin_last_name]
+      required:
+        [name, slug, portal_url, admin_email, admin_first_name, admin_last_name, admin_password]
       properties:
         name: { type: string }
         slug:
@@ -1216,6 +1247,13 @@ components:
         admin_email: { type: string, format: email }
         admin_first_name: { type: string }
         admin_last_name: { type: string }
+        admin_password:
+          type: string
+          format: password
+          minLength: 8
+          description: >
+            Initial password for the provisioned Org Admin, set by the Super
+            Admin (v1 has no email delivery). Changeable via /auth/change-password.
 
     TenantSettings:
       type: object

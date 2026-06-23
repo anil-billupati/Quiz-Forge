@@ -8,29 +8,47 @@ framework: fastapi
 frontend:
   language: typescript
   framework: nextjs
-region: tbd
-environments: tbd
+
+# Deployment is intentionally platform-agnostic (ADR-003): stateless,
+# horizontally scalable containers with all state externalized to
+# PostgreSQL + Redis. Compute platform (Fargate/EKS) and sizing are decided
+# at provisioning time, not pinned here.
+compute:
+  model: container
+  platform: agnostic        # Fargate / EKS / Docker — chosen at provisioning
+  scaling: horizontal
+
+region: us-east-1            # changeable default; single-region for v1, override per environment
+
+environments:
+  - dev
+  - staging
+  - production
+
+services:
+  - name: api
+    type: http
+    description: FastAPI REST API (tenancy, authoring, registration, results, audit)
+  - name: ws-gateway
+    type: websocket
+    description: Live WebSocket fan-out, presence, answer intake/ack
+  - name: engine-workers
+    type: worker
+    description: Execution, Scoring, Leaderboard, Elimination engines (partitioned by contest_id)
+  - name: web
+    type: frontend
+    description: Next.js/TypeScript web app
+
 data-stores:
-  primary: postgresql
-  postgresql:
-    provider: aws-rds
-    deployment: multi-az
-    proxy: pgbouncer-if-needed
-    read_replica: true
-    backup_retention_days: 35
-  cache:
-    provider: aws-elasticache-redis
-    mode: cluster
-    uses:
-      - leaderboard-zsets
-      - pub-sub
-      - ws-presence
-      - dedupe-keys
-      - rate-limits
-      - command-stream
-integrations:
-  queue: redis-streams
-  edge: aws-waf-alb
-  secrets: aws-secrets-manager
-  observability: opentelemetry-aws-cloudwatch
-compliance: soc2-gdpr-readiness
+  - type: postgresql
+    name: contestforge-db
+    purpose: Authoritative system of record; shared schema, tenant_id-scoped, RLS. Multi-AZ; read replica for reports.
+  - type: redis
+    name: contestforge-cache
+    purpose: Leaderboard sorted sets, WebSocket pub/sub fan-out, Redis Streams command bus, presence, idempotency/dedupe keys. Rebuildable cache.
+
+integrations: []            # No external systems in v1; notifications are in-app WebSocket events
+
+compliance:
+  - soc2-type-ii
+  - gdpr-readiness

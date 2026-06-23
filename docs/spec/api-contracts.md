@@ -89,9 +89,12 @@ new one (domain rule BR-20). `/auth/logout` revokes immediately.
 ```json
 // POST /users (201)
 { "email": "ravi@acme.test", "first_name": "Ravi", "last_name": "Kumar",
-  "role": "PARTICIPANT" }
+  "role": "PARTICIPANT", "password": "set-by-org-admin" }
 ```
-`role = SUPER_ADMIN` is rejected by `POST /users`; use `POST /super-admins` instead. Duplicate email within the tenant → `409`.
+`password` is required — the creating Org Admin sets it (v1 has no email
+delivery); the user can change it via `POST /auth/change-password`.
+`role = SUPER_ADMIN` is rejected by `POST /users`; use `POST /super-admins`
+instead. Duplicate email within the tenant → `409`.
 
 ---
 
@@ -113,7 +116,7 @@ new one (domain rule BR-20). `/auth/logout` revokes immediately.
 { "name": "Acme University", "slug": "acme",
   "portal_url": "https://acme.contestforge.com",
   "admin_email": "lead@acme.test", "admin_first_name": "Asha",
-  "admin_last_name": "Rao" }
+  "admin_last_name": "Rao", "admin_password": "set-by-super-admin" }
 ```
 `slug` and `portal_url` are unique platform-wide and **immutable** once the
 tenant publishes its first contest (BR-19) — `PATCH /organizations/{orgId}` does
@@ -317,9 +320,23 @@ REST covers authoring, administration, and results. The live contest runs over
 a WebSocket connection; the contract is documented here so frontend and backend
 agree (it is not part of the OpenAPI document).
 
-**Connect:** `wss://api.contestforge.example/v1/contests/{contestId}/live`
-with the JWT supplied as a connection token (subprotocol or query token). The
-server validates role, tenant, and an active Registration.
+**Authentication (no JWT in the URL).** Browsers cannot set an `Authorization`
+header on a WebSocket handshake, so the access token is **never** placed in the
+query string. Instead a short-lived, single-use **connection ticket** is used:
+
+1. `POST /contests/{contestId}/live-ticket` — authenticated with the normal
+   `Authorization: Bearer <access_token>` header. The server validates role,
+   tenant, and an active Registration, then returns
+   `{ "ticket": "<opaque>", "expires_in": 30 }`. The ticket is single-use,
+   short-lived (~30s), and bound to the user + contest.
+2. **Connect:** `wss://api.contestforge.example/v1/contests/{contestId}/live`
+   presenting the ticket via the `Sec-WebSocket-Protocol` header
+   (e.g. subprotocol `ticket.<value>`). The server consumes the ticket, resolves
+   the principal, and upgrades the connection. Expired/used/invalid tickets are
+   rejected before upgrade.
+
+This keeps the credential exchange header-based and ensures no long-lived token
+ever appears in a URL, log, or browser history.
 
 **Server → client events**
 
