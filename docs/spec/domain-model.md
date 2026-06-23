@@ -57,8 +57,8 @@ high-insert tables (`AnswerSubmission`, `Score`, etc.).
 - `max_concurrent_live_contests` (int, default 5)
 - `max_participants_per_contest` (int, default 10_000)
 - `max_questions_per_contest` (int, default 200)
-- `default_negative_marking` (boolean, default false)
 - `updated_at` (timestamp)
+- *(Removed in v0.4: `default_negative_marking` — negative marking is not supported.)*
 
 **User**
 - `id` (UUIDv7, PK)
@@ -135,9 +135,11 @@ high-insert tables (`AnswerSubmission`, `Score`, etc.).
   reset at the start of the next group instead of carrying forward (FR-37)
 - **Scoring config (derived by mode):**
   - `correct_points` (int, default 10; Fixed)
-  - `wrong_points` (int, default 0; may be negative; Fixed)
   - `second_chance_rate` (decimal, default 0.5)
-  - `time_bands` (array; Speed) or `decay` `{max_points, floor, decay_rate}` (Speed)
+  - `time_bands` (array; Speed) or `decay` `{max_points, floor, decay_rate}` (Speed;
+    bands and decay are mutually exclusive)
+  - *(Removed in v0.4: `wrong_points` — a wrong answer always scores 0; no negative
+    marking; cumulative score is floored at 0.)*
 - *FKs:* `(tenant_id, contest_id)` references `Contest(tenant_id, id)`;
   `(tenant_id, group_id)` references `Group(tenant_id, id)`
 - *CHECK:* exactly one of (`contest_id`, `group_id`) is not null.
@@ -149,14 +151,16 @@ high-insert tables (`AnswerSubmission`, `Score`, etc.).
 - `tenant_id` (UUID, FK → Organization)
 - `config_block_id` (UUID, FK → ConfigurationBlock)
 - `type` (enum: FIFTY_FIFTY | SECOND_CHANCE | SKIP)
-- `usage_limit` (int — max uses per participant per quiz/group)
-- `eligibility` (string — e.g. `ALL` | `TOP_50_PERCENT`)
-- `cooldown_questions` (int — minimum questions between same-wildcard uses)
-- `carry_over` (boolean — whether the wildcard carries to the next group or
-  resets; Grouped only)
+- `eligibility` (enum: `ALL` | `TOP_50_PERCENT`) — `TOP_50_PERCENT` is evaluated
+  against the last committed leaderboard at the start of the current question
 - *FK:* `(tenant_id, config_block_id)` references `ConfigurationBlock(tenant_id, id)`
 - *Constraint:* unique `(tenant_id, config_block_id, type)` — at most one config per
   wildcard type per block.
+- *Usage rule (not a column):* each enabled wildcard is usable **once per
+  participant for the whole contest**; there is no per-block usage limit, no
+  cooldown, and no per-group carryover/reset. `WildcardActivation` rows are the
+  authoritative record of what a participant has spent. (Removed in v0.4:
+  `usage_limit`, `cooldown_questions`, `carry_over`.)
 
 **Question**
 - `id` (UUIDv7, PK)
@@ -314,6 +318,9 @@ high-insert tables (`AnswerSubmission`, `Score`, etc.).
 - *FK:* `(tenant_id, config_block_id)` references `ConfigurationBlock(tenant_id, id)`
 - *Note:* how multiple rules combine is set once at the block level via
   `ConfigurationBlock.elimination_combine_operator` (AND | OR), not per rule.
+- *Note (BOTTOM_X_PERCENT tie boundary):* if the X% cut-off falls inside a group
+  of tied participants, **all tied participants in the cut are eliminated** — a
+  tie is never split. (FR-34)
 
 **Checkpoint**
 - `id` (UUIDv7, PK)
@@ -599,7 +606,6 @@ erDiagram
         int max_concurrent_live_contests
         int max_participants_per_contest
         int max_questions_per_contest
-        boolean default_negative_marking
     }
     USER {
         uuid id PK
@@ -689,10 +695,7 @@ erDiagram
         uuid tenant_id FK
         uuid config_block_id FK
         enum type
-        int usage_limit
-        string eligibility
-        int cooldown_questions
-        boolean carry_over
+        enum eligibility
     }
     QUESTION {
         uuid id PK
@@ -892,7 +895,10 @@ erDiagram
   rules; non-ELIMINATION blocks ignore them. (FR-10, FR-33, FR-34)
 - **BR-5 (Lifecycle monotonicity):** `lifecycle_status` advances only through the
   fixed sequence; no skipping. Structure locks at `PUBLISHED`; ConfigurationBlock
-  locks at `REGISTRATION_OPEN`. (FR-7, FR-9)
+  locks at `REGISTRATION_OPEN`. All transitions are explicit operator actions
+  **except `SCHEDULED → LIVE`, which the Execution Engine performs automatically**
+  when `Contest.scheduled_start_at` is reached (idempotent; a restart near the
+  start time cannot double-start). (FR-7, FR-9)
 - **BR-6 (Config field ranges):** Durations honor PRD bounds (question 5–300s;
   interval/explanation/leaderboard 0–60s). Other numeric bounds (points, rates,
   percentages) are validated on write. (FR-10)
@@ -911,12 +917,24 @@ erDiagram
   is selected and always preserves the correct option. (FR-23)
 - **BR-12 (Skip scoring):** SKIP awards full correct points under Fixed scoring
   and the floor score under Speed. (FR-25)
-- **BR-13 (Wildcard limits):** Activations respect the enabled set, per-type
-  `usage_limit`, `eligibility`, `cooldown_questions`, and group
-  `carry_over`/reset rules configured in `WildcardConfig`. (FR-26)
+- **BR-13 (Wildcard limits):** Activations respect the enabled set and
+  `eligibility` in `WildcardConfig`. Each enabled wildcard is usable **once per
+  participant per contest** (enforced via `WildcardActivation`); there is no
+  cooldown, no per-group reset, and no per-question cap (multiple wildcards may
+  be used on one question). `TOP_50_PERCENT` eligibility is evaluated against
+  the last committed leaderboard at the start of the current question. (FR-26)
 - **BR-14 (Tie-break order):** Ties are resolved by fastest total response time,
   then fewest wrong answers, then earliest `last_correct_at`; deterministic and
-  logged. (FR-15)
+  logged. When Second Chance is used on a question, that question contributes the
+  **second attempt's** `response_time_ms` (which also drives its Speed score).
+  (FR-15, FR-24)
+- **BR-14a (No negative marking):** A wrong/timeout answer scores 0; there is no
+  negative marking and a participant's cumulative score is floored at 0. (FR-13)
+- **BR-14b (Accuracy ranking):** `ACCURACY` criterion ranks by correct answers ÷
+  **questions revealed so far**. (FR-30)
+- **BR-14c (Speed band matching):** Time-Based bands are upper-bound-inclusive
+  and the first (fastest) matching band wins; bands and linear `decay` are
+  mutually exclusive per block. (FR-14)
 - **BR-15 (Group rollup):** Contest score is computed by the contest's rollup
   strategy (`SUM` | `WEIGHTED_SUM` | `BEST_N`). (FR-16)
 - **BR-16 (Elimination effect):** Once an EliminationEvent exists for a

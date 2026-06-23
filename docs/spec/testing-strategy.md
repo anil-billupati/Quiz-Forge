@@ -63,8 +63,9 @@ Real PostgreSQL + Redis via testcontainers.
 - **Lifecycle + config locking:** editing config after Registration Open → 409.
 - **Leaderboard rebuild (FR-44):** flush Redis, rebuild from Score rows, assert
   identical ranks/scores.
-- **Wildcard rules:** usage limits, cooldown, eligibility, Fifty-Fifty
-  blocked-after-answer, group carryover/reset.
+- **Wildcard rules:** once-per-contest usage (re-use rejected), eligibility
+  (ALL vs TOP_50_PERCENT evaluated at question start), Fifty-Fifty
+  blocked-after-answer, multiple wildcards on one question allowed.
 
 ### 2.3 Contract tests
 - Run `schemathesis` against the live ASGI app using `api-contracts.yaml` to
@@ -109,7 +110,7 @@ mocking), `Playwright` (e2e), mock WebSocket server for live-view tests.
 - **Unit/component:** contest builder forms (config validation mirrors backend
   ranges), leaderboard rendering (shared-rank display, masked visibility),
   participant question view (timer display is presentational only; never drives
-  scoring), wildcard UI states (disabled/used/cooldown).
+  scoring), wildcard UI states (available/used/ineligible).
 - **Integration (MSW):** API flows for login, contest CRUD, registration,
   results — against mocked endpoints derived from `api-contracts.yaml`.
 - **e2e (Playwright):** see §4.
