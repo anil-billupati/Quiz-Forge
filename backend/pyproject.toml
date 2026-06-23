@@ -1,0 +1,26 @@
+[project]
+name = "contestforge-backend"
+version = "0.1.0"
+description = "ContestForge Core Contest Engine — backend (FastAPI)"
+requires-python = ">=3.12"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "ASYNC"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    "integration: requires Postgres/Redis (testcontainers)",
+    "resilience: fault-injection / recovery suite",
+    "perf: load / latency suite",
+]
+
+[tool.mypy]
+python_version = "3.12"
+plugins = ["pydantic.mypy"]
+ignore_missing_imports = true

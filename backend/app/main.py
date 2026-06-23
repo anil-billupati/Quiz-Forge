@@ -1,0 +1,42 @@
+"""ContestForge API service entry point.
+
+Scaffold only — routers and engines are implemented per the delivery plan
+(docs/plan/delivery-plan.md), starting with Unit 1 (Platform foundation).
+"""
+from fastapi import FastAPI
+
+from app.config import get_settings
+from app.middleware.errors import register_exception_handlers
+from app.middleware.logging import configure_logging
+from app.middleware.tenant_context import TenantContextMiddleware
+from app.observability.tracing import configure_tracing
+from app.routers import auth, health, organizations, users
+
+settings = get_settings()
+
+
+def create_app() -> FastAPI:
+    configure_logging(settings.log_level)
+    app = FastAPI(
+        title="ContestForge Core Contest Engine API",
+        version="1.0.0",
+        description="Multi-tenant live contest engine. See docs/spec/api-contracts.yaml.",
+    )
+
+    # Tenant context is established per request (ADR-001); JWT population in Unit 2.
+    app.add_middleware(TenantContextMiddleware)
+
+    register_exception_handlers(app)
+    configure_tracing(app, settings.service_name)
+
+    # Ops endpoints (Unit 1). Resource routers are registered as units land.
+    app.include_router(health.router)
+    # Unit 2 — Tenancy & Identity.
+    app.include_router(auth.router)
+    app.include_router(organizations.router)
+    app.include_router(users.router)
+
+    return app
+
+
+app = create_app()
