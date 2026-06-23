@@ -12,6 +12,8 @@ from app.models.tenant_usage import TenantUsageRecord
 from app.models.contest import Contest, ContestLifecycleEvent
 from app.models.group import Group
 from app.models.foundation_probe import FoundationProbe
+from app.models.configuration_block import ConfigurationBlock
+from app.models.wildcard_config import WildcardConfig
 
 __all__ = [
     "Base",
@@ -24,4 +26,6 @@ __all__ = [
     "ContestLifecycleEvent",
     "Group",
     "FoundationProbe",
+    "ConfigurationBlock",
+    "WildcardConfig",
 ]

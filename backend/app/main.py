@@ -10,7 +10,7 @@ from app.middleware.errors import register_exception_handlers
 from app.middleware.logging import configure_logging
 from app.middleware.tenant_context import TenantContextMiddleware
 from app.observability.tracing import configure_tracing
-from app.routers import auth, contests, groups, health, organizations, users
+from app.routers import auth, configurations, contests, groups, health, organizations, users, wildcards
 
 settings = get_settings()
 
@@ -35,9 +35,11 @@ def create_app() -> FastAPI:
     app.include_router(auth.router)
     app.include_router(organizations.router)
     app.include_router(users.router)
-    # Unit 3 — Contest authoring & lifecycle (F6) + groups (F7).
+    # Unit 3 — Contest authoring: lifecycle (F6) + groups (F7) + config blocks (F8) + wildcards (F9).
     app.include_router(contests.router)
     app.include_router(groups.router)
+    app.include_router(configurations.router)
+    app.include_router(wildcards.router)
 
     return app
 
