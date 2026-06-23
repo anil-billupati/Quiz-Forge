@@ -23,7 +23,8 @@ the caller's `role` and `tenant_id`. Roles: `SUPER_ADMIN`, `ORG_ADMIN`,
 2. The Super Admin creates an organization via `POST /organizations`, which
    provisions that tenant's initial **Org Admin**.
 3. An **Org Admin** creates co-Org-Admins, Moderators, and Participants via
-   `POST /users`. `POST /users` rejects `role = SUPER_ADMIN`.
+   `POST /users` (or bulk-imports Participants via `POST /users/bulk`).
+   `POST /users` rejects `role = SUPER_ADMIN`. There is no public self-signup.
 
 ### Error model
 All errors share one shape:
@@ -81,10 +82,17 @@ new one (domain rule BR-20). `/auth/logout` revokes immediately.
 | Method | Path | Description |
 |---|---|---|
 | POST | `/users` | Create a tenant user (`ORG_ADMIN | MODERATOR | PARTICIPANT`). |
+| POST | `/users/bulk` | Bulk-import `PARTICIPANT` accounts (CSV/JSON); returns one-time passwords. |
 | GET | `/users` | List/filter by `role`, `status` (paginated). |
 | GET | `/users/{userId}` | Get a user. |
 | PATCH | `/users/{userId}` | Update first/last name or status. |
 | POST | `/super-admins` | Create a new Super Admin (Super Admin only). |
+
+`POST /users/bulk` accepts an array of `{email, first_name, last_name}` (or a CSV
+with that header), creates `PARTICIPANT` accounts, and returns a per-row result
+(`CREATED` with a generated `one_time_password`, or `SKIPPED` with a `reason`
+such as `duplicate_email`). It is the scale mechanism for populating large
+contests; there is still **no public self-signup**.
 
 ```json
 // POST /users (201)
@@ -170,8 +178,9 @@ Lifecycle is fixed and non-skippable:
 
 The Configuration Block is the core of the system. **`mode` determines the
 scoring model** — `STANDARD`/`ELIMINATION` use the fixed-scoring fields
-(`correct_points`, `wrong_points`, `second_chance_rate`); `SPEED` uses
-`time_bands` or `decay`. Reveal modes are `AUTOMATIC | MODERATOR_CONTROLLED`.
+(`correct_points`, `second_chance_rate`; wrong = 0, **no negative marking**);
+`SPEED` uses `time_bands` (upper-inclusive, first-match-wins) or `decay`
+(mutually exclusive). Reveal modes are `AUTOMATIC | MODERATOR_CONTROLLED`.
 For `ELIMINATION`, `elimination_rules`, `checkpoints`, and a block-level
 `elimination_combine_operator` (`AND`/`OR`) are required; supplying them on a
 non-elimination block, or omitting them on an elimination block, → `422`.
@@ -197,8 +206,7 @@ non-elimination block, or omitting them on an elimination block, → `422`.
     { "max_seconds": 20, "points": 25 }
   ],
   "wildcards": [
-    { "type": "FIFTY_FIFTY", "usage_limit": 1, "eligibility": "ALL",
-      "cooldown_questions": 3, "carry_over": false }
+    { "type": "FIFTY_FIFTY", "eligibility": "ALL" }
   ]
 }
 ```
@@ -354,7 +362,7 @@ ever appears in a URL, log, or browser history.
 | Action | Payload | Rules |
 |---|---|---|
 | `answer.submit` | question id, selected option id, `attempt_no` | Rejected if past server-side `submission_close_at` (`reason: window_closed`, FR-20) or participant eliminated. Server timestamp is authoritative (FR-40). |
-| `wildcard.activate` | type, question id | Subject to enabled set, usage limit, eligibility, cooldown; Fifty-Fifty rejected after an answer is selected (FR-23/26). |
+| `wildcard.activate` | type, question id | Subject to enabled set and eligibility; each wildcard usable once per contest (no cooldown/carryover); Fifty-Fifty rejected after an answer is selected (FR-23/26). |
 | `moderator.reveal` | question id | Moderator only; Moderator-Controlled mode (mirrors `POST /control/reveal`). |
 | `moderator.advance` | scope (QUESTION/GROUP) | Moderator override (mirrors `POST /control/advance`). |
 

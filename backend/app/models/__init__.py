@@ -9,6 +9,7 @@ from app.models.base import Base
 from app.models.organization import Organization, TenantSettings
 from app.models.user import RefreshToken, User
 from app.models.tenant_usage import TenantUsageRecord
+from app.models.contest import Contest, ContestLifecycleEvent
 from app.models.foundation_probe import FoundationProbe
 
 __all__ = [
@@ -18,5 +19,7 @@ __all__ = [
     "User",
     "RefreshToken",
     "TenantUsageRecord",
+    "Contest",
+    "ContestLifecycleEvent",
     "FoundationProbe",
 ]

@@ -54,7 +54,7 @@ Units from `docs/plan/delivery-plan.md`. Status: ☐ not started · ◐ in progr
 |---|---|---|
 | 1 | Platform foundation | ☑ |
 | 2 | Tenancy & Identity | ☑ |
-| 3 | Contest authoring — contests, groups & lifecycle | ☐ |
+| 3 | Contest authoring — contests, groups & lifecycle | ◐ |
 | 4 | Configuration blocks | ☐ |
 | 5 | Questions & options | ☐ |
 | 6 | Registration | ☐ |

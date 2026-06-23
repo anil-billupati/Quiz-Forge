@@ -8,6 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies import Principal, db_session, require_roles
 from app.middleware.errors import AppError
 from app.schemas.user import (
+    BulkCreateParticipantsRequest,
+    BulkCreateParticipantsResult,
     CreateSuperAdminRequest,
     CreateUserRequest,
     UpdateUserRequest,
@@ -34,6 +36,16 @@ async def create_user(
 ) -> UserOut:
     tenant_id = _require_tenant(principal)
     return UserOut.model_validate(await svc.create_user(session, tenant_id, body))
+
+
+@router.post("/users/bulk", response_model=BulkCreateParticipantsResult)
+async def bulk_create_participants(
+    body: BulkCreateParticipantsRequest,
+    principal: Principal = Depends(_org_admin),
+    session: AsyncSession = Depends(db_session),
+) -> BulkCreateParticipantsResult:
+    tenant_id = _require_tenant(principal)
+    return await svc.bulk_create_participants(session, tenant_id, body)
 
 
 @router.get("/users", response_model=list[UserOut])

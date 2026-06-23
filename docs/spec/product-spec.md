@@ -42,12 +42,17 @@ Operates above all tenants.
 ### 2.2 Org Admin (tenant-scoped)
 Owns contest configuration within one organization.
 
+- **Manage tenant users:** create Org Admins, Moderators, and Participants
+  individually, **or bulk-import Participants from a CSV** (`email, first_name,
+  last_name`). Bulk import creates `PARTICIPANT` accounts and returns generated
+  one-time credentials for out-of-band distribution (v1 has no email delivery);
+  duplicates are skipped with a per-row reason. There is no public self-signup.
 - **Create contest (Draft):** choose Structure (Normal | Grouped); set
   metadata (name, description, schedule).
 - **Configure Configuration Block(s):** Mode, Question/Interval/Explanation/
-  Leaderboard durations, wildcards (enabled set, limits, eligibility,
-  cooldown), elimination rules (if Mode = Elimination), reveal mode, ranking
-  criteria. For Normal one block; for Grouped one block per group.
+  Leaderboard durations, wildcards (enabled set + eligibility), elimination
+  rules (if Mode = Elimination), reveal mode, ranking criteria. For Normal one
+  block; for Grouped one block per group.
 - **Author questions:** add questions, options, correct answer, optional
   explanation; for Grouped, assign questions to groups.
 - **Manage lifecycle:** Draft → Published → Registration Open → Registration
@@ -136,29 +141,41 @@ Numbered for traceability. **FR-#**.
   contest has one Configuration Block per group (≥1 group).
 - **FR-9** The contest progresses through the fixed lifecycle (Draft →
   Published → Registration Open → Registration Closed → Scheduled → Live →
-  Completed → Archived); no stage may be skipped.
+  Completed → Archived); no stage may be skipped. All transitions are explicit
+  operator (Org Admin) actions **except Scheduled → Live, which is automatic**:
+  once a contest is Scheduled with `scheduled_start_at`, the platform goes Live
+  automatically when that time is reached, with no human action.
 - **FR-10** A Configuration Block contains: Mode; Question Duration (5–300s);
   Question Interval (0–60s); Explanation Duration (0–60s); Leaderboard
-  Duration (0–60s); enabled Wildcards with limits/eligibility/cooldown;
-  Elimination Rules (required iff Mode = Elimination); Reveal Mode; Ranking
-  Criterion. Scoring Model is derived from Mode and not independently set.
+  Duration (0–60s); enabled Wildcards with eligibility (each usable once per
+  contest; no cooldown/carryover); Elimination Rules (required iff Mode =
+  Elimination); Reveal Mode; Ranking Criterion. Scoring Model is derived from
+  Mode and not independently set.
 
 ### Modes & Scoring
 - **FR-11** Mode ∈ {Standard, Speed, Elimination}, available to both Normal and
   Grouped structures.
 - **FR-12** Standard and Elimination use Fixed Scoring; Speed uses Time-Based
   Scoring. Scoring model cannot be chosen independently of Mode.
-- **FR-13** Fixed Scoring: correct = +10 (configurable); wrong = 0 or
-  configured negative marks; no answer/timeout = 0 (no penalty unless
-  configured); Second Chance correct = reduced rate (default 50%).
+- **FR-13** Fixed Scoring: correct = +10 (configurable); wrong = 0
+  (**no negative marking**); no answer/timeout = 0; Second Chance correct =
+  reduced rate (default 50%). A participant's cumulative score never falls
+  below 0.
 - **FR-14** Time-Based Scoring: points decrease as response time increases,
-  using configurable bands (default 100/75/50/25/10 across 0–5/5–10/10–15/
-  15–20/20+ seconds) or a linear decay
-  `points = max(floor, maxPoints − elapsedSeconds × decayRate)`. Timeout = 0
-  (no floor).
+  using configurable bands (default 100/75/50/25/10 across 0–5/6–10/11–15/
+  16–20/20+ seconds) or a linear decay
+  `points = max(floor, maxPoints − elapsedSeconds × decayRate)`; bands and
+  decay are mutually exclusive per block. Bands match deterministically:
+  each band is defined by its upper bound (`max_seconds`), a response falls in
+  the **lowest band whose upper bound it does not exceed** (upper-inclusive,
+  first match wins), so exactly 5.000 s → 100 and 5.001 s → 75. Response time
+  is measured server-side from the authoritative `QuestionWindow.revealed_at`
+  to server acceptance (single reveal instant, not per-client delivery).
+  Timeout = 0 (no floor).
 - **FR-15** Tie-breaking applies in order: (1) fastest total completion time,
   (2) fewest wrong answers, (3) earliest last correct submission. The sequence
-  is deterministic and logged.
+  is deterministic and logged. When Second Chance is used on a question, that
+  question contributes the **second attempt's** response time to the total.
 - **FR-16** Grouped contests roll up group scores via one configurable
   strategy: Sum (default), Weighted Sum, or Best N Groups.
 
@@ -183,14 +200,18 @@ Numbered for traceability. **FR-#**.
 - **FR-23** Fifty-Fifty removes two incorrect options (correct always
   preserved); cannot be used after an answer is selected.
 - **FR-24** Second Chance allows one more attempt after a wrong answer at
-  reduced points (default 50%).
+  reduced points (default 50%). The second attempt's response time is the one
+  used for that question's Speed scoring and tie-break contribution (FR-15).
 - **FR-25** Skip Question awards full points without showing/attempting it: in
   Fixed scoring, the full correct value; in Speed, the floor score (the minimum
   score for a correct answer; distinct from timeout, which awards 0).
-- **FR-26** Wildcard usage respects per-block configuration: enabled set, usage
-  limit per participant per quiz/group, eligibility (e.g., all participants or
-  top 50% by score), group carryover/reset (Grouped), and cooldown (minimum
-  questions between same-wildcard uses).
+- **FR-26** Each enabled wildcard is usable **at most once per participant for
+  the entire contest** (not per group); there is **no cooldown** and **no
+  per-group carryover/reset** — once used anywhere it is spent. A participant
+  may use more than one wildcard on the same question (no per-question limit).
+  Eligibility is `ALL` or `TOP_50_PERCENT` (top 50% by score), evaluated
+  against the **last committed leaderboard at the start of the current
+  question**.
 - **FR-27** Every wildcard activation is logged (participant ID, type, question
   number, timestamp, outcome) and included in result exports.
 
@@ -206,8 +227,9 @@ Numbered for traceability. **FR-#**.
     submission).
   - **Score + Time:** score first, then shortest total completion time;
     tie-break uses fewest wrong answers, then earliest last correct submission.
-  - **Accuracy:** highest correct percentage first; tie-break uses score, then
-    fastest total completion time.
+  - **Accuracy:** highest correct percentage first (correct ÷ **questions
+    revealed so far**); tie-break uses score, then fastest total completion
+    time.
 - **FR-31** Update frequency is configurable: after every answer (≤500
   participants), after every question (default), or after every group (>5,000
   participants).
@@ -220,7 +242,9 @@ Numbered for traceability. **FR-#**.
   Elimination; in Grouped contests, only Elimination groups are affected.
 - **FR-34** Elimination rules — First Wrong Answer, N Wrong Answers (default 3),
   Bottom X Percent, Minimum Score Threshold — may be combined with AND/OR
-  within one block.
+  within one block. For Bottom X Percent, if the cut-off lands inside a group
+  of tied participants, **all tied participants in the cut are eliminated** (a
+  tie is never split).
 - **FR-35** Checkpoints: After Question (specific question close), After Group,
   or Custom Milestone (admin-defined timestamp/event).
 - **FR-36** At a checkpoint: evaluate rule → determine eliminated set → notify
@@ -346,6 +370,7 @@ The Core Contest Engine spec does **not** cover:
 2. **Timeline / Budget** — Not yet provided (carried from kickoff).
 3. **Notification transport** — In-app WebSocket events for v1; email/SMS/webhooks
    deferred to a later integration.
-4. **Negative marking defaults** — `wrong_points` defaults to `0` per
-   Configuration Block. Per-tenant defaults may be added once a `TenantSettings`
-   entity is introduced.
+4. **Negative marking** — Resolved: negative marking is **not supported**. A
+   wrong answer always scores 0 and cumulative score is floored at 0. The
+   `wrong_points` field and the `default_negative_marking` tenant setting are
+   removed.

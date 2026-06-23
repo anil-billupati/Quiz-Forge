@@ -7,21 +7,32 @@ covered by the automatic scoping mixin.
 """
 from __future__ import annotations
 
+from email_validator import EmailNotValidError, validate_email
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.middleware.errors import AppError
 from app.models.base import new_uuid
 from app.models.user import ROLES, User
-from app.schemas.user import CreateSuperAdminRequest, CreateUserRequest, UpdateUserRequest
-from app.security.passwords import hash_password
+from app.schemas.user import (
+    BulkCreateParticipantsRequest,
+    BulkCreateParticipantsResult,
+    BulkParticipantResult,
+    CreateSuperAdminRequest,
+    CreateUserRequest,
+    UpdateUserRequest,
+)
+from app.security.passwords import generate_one_time_password, hash_password
 
 TENANT_CREATABLE_ROLES = ("ORG_ADMIN", "MODERATOR", "PARTICIPANT")
 
 
 async def _email_taken(session: AsyncSession, tenant_id: str | None, email: str) -> bool:
     stmt = select(User).where(User.email == email)
-    stmt = stmt.where(User.tenant_id == tenant_id) if tenant_id else stmt.where(User.tenant_id.is_(None))
+    if tenant_id:
+        stmt = stmt.where(User.tenant_id == tenant_id)
+    else:
+        stmt = stmt.where(User.tenant_id.is_(None))
     return (await session.execute(stmt)).scalar_one_or_none() is not None
 
 
@@ -63,6 +74,63 @@ async def create_super_admin(session: AsyncSession, payload: CreateSuperAdminReq
     await session.commit()
     await session.refresh(user)
     return user
+
+
+async def bulk_create_participants(
+    session: AsyncSession, tenant_id: str, payload: BulkCreateParticipantsRequest
+) -> BulkCreateParticipantsResult:
+    """Bulk-create PARTICIPANT accounts from a list (F5, FR-3a).
+
+    Partial success: malformed emails and duplicates (already in the tenant or
+    repeated within the batch) are SKIPPED with a reason; valid new rows are
+    CREATED with a generated one-time password returned for out-of-band
+    distribution. All creates commit in a single transaction.
+    """
+    candidate_emails = [row.email for row in payload.participants]
+    existing_rows = await session.execute(
+        select(User.email).where(User.tenant_id == tenant_id, User.email.in_(candidate_emails))
+    )
+    existing: set[str] = {email for (email,) in existing_rows.all()}
+
+    seen: set[str] = set()
+    results: list[BulkParticipantResult] = []
+    for row in payload.participants:
+        email = row.email.strip()
+        try:
+            validate_email(email, check_deliverability=False)
+        except EmailNotValidError:
+            results.append(
+                BulkParticipantResult(email=row.email, status="SKIPPED", reason="invalid_email")
+            )
+            continue
+        if email in existing or email in seen:
+            results.append(
+                BulkParticipantResult(email=email, status="SKIPPED", reason="duplicate_email")
+            )
+            continue
+        seen.add(email)
+        otp = generate_one_time_password()
+        user = User(
+            id=new_uuid(),
+            tenant_id=tenant_id,
+            email=email,
+            password_hash=hash_password(otp),
+            role="PARTICIPANT",
+            first_name=row.first_name,
+            last_name=row.last_name,
+        )
+        session.add(user)
+        results.append(
+            BulkParticipantResult(
+                email=email, status="CREATED", user_id=user.id, one_time_password=otp
+            )
+        )
+
+    await session.commit()
+    created = sum(1 for r in results if r.status == "CREATED")
+    return BulkCreateParticipantsResult(
+        created_count=created, skipped_count=len(results) - created, results=results
+    )
 
 
 async def list_users(
