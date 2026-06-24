@@ -23,10 +23,12 @@ from app.schemas.user import (
     UpdateUserRequest,
 )
 from app.security.passwords import generate_one_time_password, hash_password
+from app.observability.method_logging import logged
 
 TENANT_CREATABLE_ROLES = ("ORG_ADMIN", "MODERATOR", "PARTICIPANT")
 
 
+@logged
 async def _email_taken(session: AsyncSession, tenant_id: str | None, email: str) -> bool:
     stmt = select(User).where(User.email == email)
     if tenant_id:
@@ -36,6 +38,7 @@ async def _email_taken(session: AsyncSession, tenant_id: str | None, email: str)
     return (await session.execute(stmt)).scalar_one_or_none() is not None
 
 
+@logged
 async def create_user(session: AsyncSession, tenant_id: str, payload: CreateUserRequest) -> User:
     if payload.role not in TENANT_CREATABLE_ROLES:
         raise AppError(
@@ -58,6 +61,7 @@ async def create_user(session: AsyncSession, tenant_id: str, payload: CreateUser
     return user
 
 
+@logged
 async def create_super_admin(session: AsyncSession, payload: CreateSuperAdminRequest) -> User:
     if await _email_taken(session, None, payload.email):
         raise AppError(409, "EMAIL_EXISTS", "A Super Admin with this email already exists")
@@ -76,6 +80,7 @@ async def create_super_admin(session: AsyncSession, payload: CreateSuperAdminReq
     return user
 
 
+@logged
 async def bulk_create_participants(
     session: AsyncSession, tenant_id: str, payload: BulkCreateParticipantsRequest
 ) -> BulkCreateParticipantsResult:
@@ -133,6 +138,7 @@ async def bulk_create_participants(
     )
 
 
+@logged
 async def list_users(
     session: AsyncSession, tenant_id: str, *, role: str | None, status: str | None, limit: int
 ) -> list[User]:
@@ -145,6 +151,7 @@ async def list_users(
     return list((await session.execute(stmt)).scalars().all())
 
 
+@logged
 async def get_user(session: AsyncSession, tenant_id: str, user_id: str) -> User:
     user = (
         await session.execute(
@@ -156,6 +163,7 @@ async def get_user(session: AsyncSession, tenant_id: str, user_id: str) -> User:
     return user
 
 
+@logged
 async def update_user(
     session: AsyncSession, tenant_id: str, user_id: str, payload: UpdateUserRequest
 ) -> User:

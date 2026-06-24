@@ -23,6 +23,7 @@ from app.models.contest import (
 )
 from app.models.organization import Organization
 from app.schemas.contest import CreateContestRequest, UpdateContestRequest
+from app.observability.method_logging import logged
 
 # The lifecycle is a fixed, ordered sequence; a contest advances one step at a
 # time and never skips (BR-5).
@@ -32,6 +33,7 @@ _NEXT_STATUS: dict[str, str] = {
 }
 
 
+@logged
 def _validate_rollup(group_score_rollup: str | None, rollup_best_n: int | None) -> None:
     if group_score_rollup is None:
         return
@@ -45,6 +47,7 @@ def _validate_rollup(group_score_rollup: str | None, rollup_best_n: int | None) 
         )
 
 
+@logged
 async def create_contest(
     session: AsyncSession, tenant_id: str, payload: CreateContestRequest, created_by: str
 ) -> Contest:
@@ -68,6 +71,7 @@ async def create_contest(
     return contest
 
 
+@logged
 async def list_contests(
     session: AsyncSession, tenant_id: str, *, status: str | None, limit: int
 ) -> list[Contest]:
@@ -78,6 +82,7 @@ async def list_contests(
     return list((await session.execute(stmt)).scalars().all())
 
 
+@logged
 async def get_contest(session: AsyncSession, tenant_id: str, contest_id: str) -> Contest:
     contest = (
         await session.execute(
@@ -89,6 +94,7 @@ async def get_contest(session: AsyncSession, tenant_id: str, contest_id: str) ->
     return contest
 
 
+@logged
 async def update_contest(
     session: AsyncSession, tenant_id: str, contest_id: str, payload: UpdateContestRequest
 ) -> Contest:
@@ -104,6 +110,7 @@ async def update_contest(
     return contest
 
 
+@logged
 async def delete_contest(session: AsyncSession, tenant_id: str, contest_id: str) -> None:
     contest = await get_contest(session, tenant_id, contest_id)
     if contest.lifecycle_status != "DRAFT":
@@ -112,6 +119,7 @@ async def delete_contest(session: AsyncSession, tenant_id: str, contest_id: str)
     await session.commit()
 
 
+@logged
 async def transition_lifecycle(
     session: AsyncSession,
     tenant_id: str,

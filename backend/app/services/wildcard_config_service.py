@@ -16,8 +16,10 @@ from app.models.configuration_block import ConfigurationBlock
 from app.models.wildcard_config import ELIGIBILITIES, WILDCARD_TYPES, WildcardConfig
 from app.schemas.wildcard import WildcardConfigCreate, WildcardConfigUpdate
 from app.services import configuration_service
+from app.observability.method_logging import logged
 
 
+@logged
 async def _require_block(
     session: AsyncSession, tenant_id: str, config_block_id: str
 ) -> ConfigurationBlock:
@@ -59,6 +61,7 @@ async def _require_block(
     return block
 
 
+@logged
 def _validate_type(wildcard_type: str) -> None:
     if wildcard_type not in WILDCARD_TYPES:
         raise AppError(
@@ -68,6 +71,7 @@ def _validate_type(wildcard_type: str) -> None:
         )
 
 
+@logged
 def _validate_eligibility(eligibility: str) -> None:
     if eligibility not in ELIGIBILITIES:
         raise AppError(
@@ -77,6 +81,7 @@ def _validate_eligibility(eligibility: str) -> None:
         )
 
 
+@logged
 async def create_wildcard_config(
     session: AsyncSession, tenant_id: str, config_block_id: str, payload: WildcardConfigCreate
 ) -> WildcardConfig:
@@ -103,6 +108,7 @@ async def create_wildcard_config(
     return config
 
 
+@logged
 async def list_wildcard_configs(
     session: AsyncSession, tenant_id: str, config_block_id: str
 ) -> list[WildcardConfig]:
@@ -118,6 +124,7 @@ async def list_wildcard_configs(
     return list((await session.execute(stmt)).scalars().all())
 
 
+@logged
 async def get_wildcard_config(
     session: AsyncSession, tenant_id: str, config_block_id: str, wildcard_type: str
 ) -> WildcardConfig:
@@ -137,6 +144,7 @@ async def get_wildcard_config(
     return config
 
 
+@logged
 async def update_wildcard_config(
     session: AsyncSession,
     tenant_id: str,
@@ -153,6 +161,7 @@ async def update_wildcard_config(
     return config
 
 
+@logged
 async def delete_wildcard_config(
     session: AsyncSession, tenant_id: str, config_block_id: str, wildcard_type: str
 ) -> None:

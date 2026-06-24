@@ -28,8 +28,10 @@ from app.schemas.configuration import (
     TimeBasedScoringConfig,
 )
 from app.services import contest_service, group_service
+from app.observability.method_logging import logged
 
 
+@logged
 def _default_scoring_config(mode: str) -> dict[str, Any]:
     if mode == "SPEED":
         # Sensible default bands: 0-5s=100, 6-10s=75, 11-15s=50, 16-20s=25, 20+=10.
@@ -45,10 +47,12 @@ def _default_scoring_config(mode: str) -> dict[str, Any]:
     return FixedScoringConfig().model_dump(mode="json")
 
 
+@logged
 def _derive_scoring_model(mode: str) -> str:
     return "TIME_BASED" if mode == "SPEED" else "FIXED"
 
 
+@logged
 def _validate_mode_structure(contest: Contest, group_id: str | None) -> None:
     if group_id is not None and contest.structure != "GROUPED":
         raise AppError(
@@ -58,6 +62,7 @@ def _validate_mode_structure(contest: Contest, group_id: str | None) -> None:
         )
 
 
+@logged
 async def _require_draft_contest(
     session: AsyncSession, tenant_id: str, contest_id: str
 ) -> Contest:
@@ -69,6 +74,7 @@ async def _require_draft_contest(
     return contest
 
 
+@logged
 def _serialize_scoring_config(
     cfg: FixedScoringConfig | TimeBasedScoringConfig | None, mode: str
 ) -> dict[str, Any]:
@@ -77,6 +83,7 @@ def _serialize_scoring_config(
     return cfg.model_dump(mode="json")
 
 
+@logged
 def _normalize_config_create(
     payload: ConfigurationBlockCreate,
 ) -> dict[str, Any]:
@@ -115,6 +122,7 @@ def _normalize_config_create(
     }
 
 
+@logged
 async def create_or_replace_contest_block(
     session: AsyncSession,
     tenant_id: str,
@@ -156,6 +164,7 @@ async def create_or_replace_contest_block(
     return config
 
 
+@logged
 async def create_or_replace_group_block(
     session: AsyncSession,
     tenant_id: str,
@@ -193,6 +202,7 @@ async def create_or_replace_group_block(
     return config
 
 
+@logged
 async def get_contest_block(
     session: AsyncSession, tenant_id: str, contest_id: str
 ) -> ConfigurationBlock:
@@ -211,6 +221,7 @@ async def get_contest_block(
     return block
 
 
+@logged
 async def get_group_block(
     session: AsyncSession, tenant_id: str, contest_id: str, group_id: str
 ) -> ConfigurationBlock:
@@ -228,6 +239,7 @@ async def get_group_block(
     return block
 
 
+@logged
 async def update_contest_block(
     session: AsyncSession,
     tenant_id: str,
@@ -242,6 +254,7 @@ async def update_contest_block(
     return block
 
 
+@logged
 async def update_group_block(
     session: AsyncSession,
     tenant_id: str,
@@ -257,6 +270,7 @@ async def update_group_block(
     return block
 
 
+@logged
 def _apply_update(block: ConfigurationBlock, payload: ConfigurationBlockUpdate) -> None:
     mode = payload.mode or block.mode
 

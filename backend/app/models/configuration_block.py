@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, Index, Integer, String, func
+from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, Index, Integer, String, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TenantScoped, new_uuid
@@ -40,6 +40,21 @@ class ConfigurationBlock(Base, TenantScoped):
         Index("ix_config_block_tenant", "tenant_id"),
         Index("ix_config_block_contest", "tenant_id", "contest_id"),
         Index("ix_config_block_group", "tenant_id", "group_id"),
+        # Partial unique indexes: one block per Normal contest, one per Group.
+        Index(
+            "uq_config_block_contest",
+            "tenant_id",
+            "contest_id",
+            unique=True,
+            postgresql_where=text("group_id IS NULL"),
+        ),
+        Index(
+            "uq_config_block_group",
+            "tenant_id",
+            "group_id",
+            unique=True,
+            postgresql_where=text("contest_id IS NULL"),
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)

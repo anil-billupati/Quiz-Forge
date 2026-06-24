@@ -14,10 +14,12 @@ from app.middleware.errors import AppError
 from app.models.base import new_uuid
 from app.models.contest import Contest
 from app.models.group import Group
+from app.observability.method_logging import logged
 from app.schemas.group import CreateGroupRequest, UpdateGroupRequest
 from app.services import contest_service
 
 
+@logged
 async def _contest_for_mutation(session: AsyncSession, tenant_id: str, contest_id: str) -> Contest:
     """Load the parent contest, enforcing GROUPED + DRAFT for group edits."""
     contest = await contest_service.get_contest(session, tenant_id, contest_id)
@@ -30,6 +32,7 @@ async def _contest_for_mutation(session: AsyncSession, tenant_id: str, contest_i
     return contest
 
 
+@logged
 async def create_group(
     session: AsyncSession, tenant_id: str, contest_id: str, payload: CreateGroupRequest
 ) -> Group:
@@ -54,6 +57,7 @@ async def create_group(
     return group
 
 
+@logged
 async def list_groups(session: AsyncSession, tenant_id: str, contest_id: str) -> list[Group]:
     # Listing is allowed in any lifecycle stage; just confirm tenant ownership.
     await contest_service.get_contest(session, tenant_id, contest_id)
@@ -65,6 +69,7 @@ async def list_groups(session: AsyncSession, tenant_id: str, contest_id: str) ->
     return list((await session.execute(stmt)).scalars().all())
 
 
+@logged
 async def get_group(
     session: AsyncSession, tenant_id: str, contest_id: str, group_id: str
 ) -> Group:
@@ -82,6 +87,7 @@ async def get_group(
     return group
 
 
+@logged
 async def update_group(
     session: AsyncSession,
     tenant_id: str,
@@ -108,6 +114,7 @@ async def update_group(
     return group
 
 
+@logged
 async def delete_group(
     session: AsyncSession, tenant_id: str, contest_id: str, group_id: str
 ) -> None:
