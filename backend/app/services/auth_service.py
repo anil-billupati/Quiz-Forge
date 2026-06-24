@@ -14,7 +14,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.middleware.errors import AppError
 from app.models.base import new_uuid
-from app.models.organization import Organization
 from app.models.user import RefreshToken, User
 from app.security.passwords import hash_password, verify_password
 from app.observability.method_logging import logged
@@ -29,24 +28,14 @@ settings = get_settings()
 
 
 @logged
-async def _resolve_user(session: AsyncSession, email: str, tenant_slug: str | None) -> User | None:
-    """Look up a user by email, scoped by tenant_slug for non-super-admins."""
-    if tenant_slug:
-        org = (
-            await session.execute(select(Organization).where(Organization.slug == tenant_slug))
-        ).scalar_one_or_none()
-        if org is None:
-            return None
-        return (
-            await session.execute(
-                select(User).where(User.tenant_id == org.id, User.email == email)
-            )
-        ).scalar_one_or_none()
-    # No tenant hint → platform user (SUPER_ADMIN).
+async def _resolve_user(session: AsyncSession, email: str) -> User | None:
+    """Look up a user by email.
+
+    Email is globally unique across all tenants and platform users, so the
+    address alone identifies the account (and its tenant) without a tenant hint.
+    """
     return (
-        await session.execute(
-            select(User).where(User.email == email, User.tenant_id.is_(None))
-        )
+        await session.execute(select(User).where(User.email == email))
     ).scalar_one_or_none()
 
 
@@ -74,8 +63,8 @@ async def _issue_tokens(session: AsyncSession, user: User, family: str | None = 
 
 
 @logged
-async def login(session: AsyncSession, email: str, password: str, tenant_slug: str | None) -> dict:
-    user = await _resolve_user(session, email, tenant_slug)
+async def login(session: AsyncSession, email: str, password: str) -> dict:
+    user = await _resolve_user(session, email)
     # Constant-ish path: verify even when user missing to reduce enumeration.
     if user is None or not verify_password(password, user.password_hash):
         raise AppError(401, "INVALID_CREDENTIALS", "Email or password is incorrect")

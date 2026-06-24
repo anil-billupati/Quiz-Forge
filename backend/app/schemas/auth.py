@@ -7,9 +7,6 @@ from pydantic import BaseModel, EmailStr, Field
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
-    tenant_slug: str | None = Field(
-        default=None, description="Tenant hint for non-super-admin users (Organization.slug)"
-    )
 
 
 class TokenPair(BaseModel):
