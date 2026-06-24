@@ -20,9 +20,9 @@ ROLES = ("SUPER_ADMIN", "ORG_ADMIN", "MODERATOR", "PARTICIPANT")
 class User(Base):
     __tablename__ = "user_account"
     __table_args__ = (
-        # Email unique within a tenant. Platform-wide SUPER_ADMIN uniqueness is
-        # enforced in the service layer (partial unique index on Postgres).
-        UniqueConstraint("tenant_id", "email", name="uq_user_tenant_email"),
+        # Email is globally unique across all tenants and platform users, so a
+        # login email maps to exactly one account/tenant (no tenant hint needed).
+        UniqueConstraint("email", name="uq_user_email"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)

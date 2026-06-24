@@ -23,8 +23,10 @@ from app.schemas.organization import (
     UpdateOrganizationRequest,
 )
 from app.security.passwords import hash_password
+from app.observability.method_logging import logged
 
 
+@logged
 async def create_organization(
     session: AsyncSession, payload: CreateOrganizationRequest, created_by: str | None
 ) -> Organization:
@@ -60,6 +62,7 @@ async def create_organization(
     return org
 
 
+@logged
 async def list_organizations(
     session: AsyncSession, *, status: str | None, limit: int
 ) -> list[Organization]:
@@ -70,6 +73,7 @@ async def list_organizations(
     return list((await session.execute(stmt)).scalars().all())
 
 
+@logged
 async def get_organization(session: AsyncSession, org_id: str) -> Organization:
     org = (
         await session.execute(select(Organization).where(Organization.id == org_id))
@@ -79,6 +83,7 @@ async def get_organization(session: AsyncSession, org_id: str) -> Organization:
     return org
 
 
+@logged
 async def update_organization(
     session: AsyncSession, org_id: str, payload: UpdateOrganizationRequest
 ) -> Organization:
@@ -97,6 +102,7 @@ async def update_organization(
     return org
 
 
+@logged
 async def set_status(session: AsyncSession, org_id: str, status: str) -> Organization:
     if status not in ("ACTIVE", "SUSPENDED"):
         raise AppError(422, "INVALID_STATUS", "Status must be ACTIVE or SUSPENDED")
@@ -107,6 +113,7 @@ async def set_status(session: AsyncSession, org_id: str, status: str) -> Organiz
     return org
 
 
+@logged
 async def get_settings_for(session: AsyncSession, org_id: str) -> TenantSettings:
     await get_organization(session, org_id)  # 404 if org missing
     settings_row = (
@@ -119,6 +126,7 @@ async def get_settings_for(session: AsyncSession, org_id: str) -> TenantSettings
     return settings_row
 
 
+@logged
 async def update_settings(
     session: AsyncSession, org_id: str, patch: TenantSettingsPatch
 ) -> TenantSettings:
@@ -133,6 +141,7 @@ async def update_settings(
     return settings_row
 
 
+@logged
 async def get_usage(session: AsyncSession, org_id: str) -> TenantUsageRecord:
     """Return the latest usage record, or a zeroed current-period record.
 

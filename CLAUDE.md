@@ -37,6 +37,14 @@ Grouped structures.
   use the scoping mixin and never trust client-supplied tenant/timing data.
 - Write tests within the same unit as the code (see `testing-strategy.md`).
 - Implement one delivery unit at a time via `/neutron:feature`.
+- **Method logging:** decorate every service/business function with `@logged`
+  from `app.observability.method_logging` so it emits `method.enter` /
+  `method.exit` (with `duration_ms`) and `method.error` on failure. It supports
+  both `async def` and `def`. Do not log argument values that may contain
+  secrets (sessions, passwords, tokens) — `@logged` omits args by default; pass
+  `log_args=True` only when every argument is known to be safe. HTTP requests are
+  logged automatically by `RequestLoggingMiddleware`, which binds a `request_id`
+  shared by all method logs in that request.
 
 ## Architecture Decision Records
 

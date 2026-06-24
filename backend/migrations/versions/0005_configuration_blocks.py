@@ -69,23 +69,25 @@ def upgrade() -> None:
     op.create_index("ix_config_block_tenant_id", "configuration_block", ["tenant_id"])
     op.create_index("ix_config_block_contest", "configuration_block", ["tenant_id", "contest_id"])
     op.create_index("ix_config_block_group", "configuration_block", ["tenant_id", "group_id"])
-    op.create_unique_constraint(
+    op.create_index(
         "uq_config_block_contest",
         "configuration_block",
         ["tenant_id", "contest_id"],
+        unique=True,
         postgresql_where=sa.text("group_id IS NULL"),
     )
-    op.create_unique_constraint(
+    op.create_index(
         "uq_config_block_group",
         "configuration_block",
         ["tenant_id", "group_id"],
+        unique=True,
         postgresql_where=sa.text("contest_id IS NULL"),
     )
 
 
 def downgrade() -> None:
-    op.drop_constraint("uq_config_block_group", "configuration_block", type_="unique")
-    op.drop_constraint("uq_config_block_contest", "configuration_block", type_="unique")
+    op.drop_index("uq_config_block_group", table_name="configuration_block")
+    op.drop_index("uq_config_block_contest", table_name="configuration_block")
     op.drop_index("ix_config_block_group", table_name="configuration_block")
     op.drop_index("ix_config_block_contest", table_name="configuration_block")
     op.drop_index("ix_config_block_tenant_id", table_name="configuration_block")

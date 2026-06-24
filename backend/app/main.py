@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from app.config import get_settings
 from app.middleware.errors import register_exception_handlers
 from app.middleware.logging import configure_logging
+from app.middleware.request_logging import RequestLoggingMiddleware
 from app.middleware.tenant_context import TenantContextMiddleware
 from app.observability.tracing import configure_tracing
 from app.routers import auth, configurations, contests, groups, health, organizations, users, wildcards
@@ -25,6 +26,8 @@ def create_app() -> FastAPI:
 
     # Tenant context is established per request (ADR-001); JWT population in Unit 2.
     app.add_middleware(TenantContextMiddleware)
+    # Outermost: log request start/end and bind a correlation id for all logs.
+    app.add_middleware(RequestLoggingMiddleware)
 
     register_exception_handlers(app)
     configure_tracing(app, settings.service_name)
