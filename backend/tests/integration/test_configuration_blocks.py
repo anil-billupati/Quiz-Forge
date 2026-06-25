@@ -257,6 +257,8 @@ async def test_group_configuration(api):
     cfg = {
         "mode": "ELIMINATION",
         "elimination_combine_operator": "OR",
+        "elimination_rules": [{"type": "FIRST_WRONG"}],
+        "checkpoints": [{"type": "AFTER_GROUP"}],
         "scoring_config": {"correct_points": 10, "second_chance_rate": 0.5},
     }
     resp = await api.put(
@@ -268,6 +270,8 @@ async def test_group_configuration(api):
     data = resp.json()
     assert data["mode"] == "ELIMINATION"
     assert data["elimination_combine_operator"] == "OR"
+    assert len(data["elimination_rules"]) == 1
+    assert len(data["checkpoints"]) == 1
 
 
 @pytest.mark.asyncio
@@ -296,3 +300,166 @@ async def test_cross_tenant_configuration_isolation(api):
     )
     assert resp.status_code == 200
     assert resp.json()["id"] == block_id
+
+
+# --- Elimination configuration (BR-4) -------------------------------------
+
+
+def _elimination_cfg(**overrides) -> dict:
+    cfg = {
+        "mode": "ELIMINATION",
+        "elimination_combine_operator": "AND",
+        "elimination_rules": [
+            {"type": "N_WRONG", "n_value": 2},
+            {"type": "BOTTOM_X_PERCENT", "percent_value": 10},
+        ],
+        "checkpoints": [
+            {"type": "AFTER_QUESTION", "question_sequence": 5},
+            {"type": "AFTER_GROUP"},
+        ],
+        "scoring_config": {"correct_points": 10, "second_chance_rate": 0.5},
+    }
+    cfg.update(overrides)
+    return cfg
+
+
+async def _elimination_contest(api):
+    su = await _login(api, SUPER_EMAIL, SUPER_PASSWORD)
+    await _create_org(api, su, "acme", "admin@acme.com")
+    oa = await _login(api, "admin@acme.com", "org-admin-pw-1", tenant_slug="acme")
+    contest = await _create_normal_contest(api, oa)
+    return oa, contest
+
+
+@pytest.mark.asyncio
+async def test_elimination_config_persists_and_reads_back(api):
+    oa, contest = await _elimination_contest(api)
+
+    resp = await api.put(
+        f"/contests/{contest['id']}/configuration", headers=_auth(oa), json=_elimination_cfg()
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["mode"] == "ELIMINATION"
+    assert data["elimination_combine_operator"] == "AND"
+    assert {r["type"] for r in data["elimination_rules"]} == {"N_WRONG", "BOTTOM_X_PERCENT"}
+    assert {c["type"] for c in data["checkpoints"]} == {"AFTER_QUESTION", "AFTER_GROUP"}
+
+    get_resp = await api.get(
+        f"/contests/{contest['id']}/configuration", headers=_auth(oa)
+    )
+    assert get_resp.status_code == 200
+    assert len(get_resp.json()["elimination_rules"]) == 2
+    assert len(get_resp.json()["checkpoints"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_elimination_missing_rules_rejected(api):
+    oa, contest = await _elimination_contest(api)
+    resp = await api.put(
+        f"/contests/{contest['id']}/configuration",
+        headers=_auth(oa),
+        json=_elimination_cfg(elimination_rules=[]),
+    )
+    assert resp.status_code == 422, resp.text
+
+
+@pytest.mark.asyncio
+async def test_elimination_missing_checkpoints_rejected(api):
+    oa, contest = await _elimination_contest(api)
+    resp = await api.put(
+        f"/contests/{contest['id']}/configuration",
+        headers=_auth(oa),
+        json=_elimination_cfg(checkpoints=[]),
+    )
+    assert resp.status_code == 422, resp.text
+
+
+@pytest.mark.asyncio
+async def test_elimination_missing_operator_rejected(api):
+    oa, contest = await _elimination_contest(api)
+    resp = await api.put(
+        f"/contests/{contest['id']}/configuration",
+        headers=_auth(oa),
+        json=_elimination_cfg(elimination_combine_operator=None),
+    )
+    assert resp.status_code == 422, resp.text
+
+
+@pytest.mark.asyncio
+async def test_non_elimination_with_rules_rejected(api):
+    oa, contest = await _elimination_contest(api)
+    resp = await api.put(
+        f"/contests/{contest['id']}/configuration",
+        headers=_auth(oa),
+        json={"mode": "STANDARD", "elimination_rules": [{"type": "FIRST_WRONG"}]},
+    )
+    assert resp.status_code == 422, resp.text
+
+
+@pytest.mark.asyncio
+async def test_n_wrong_defaults_to_three(api):
+    oa, contest = await _elimination_contest(api)
+    resp = await api.put(
+        f"/contests/{contest['id']}/configuration",
+        headers=_auth(oa),
+        json=_elimination_cfg(
+            elimination_rules=[{"type": "N_WRONG"}],
+            checkpoints=[{"type": "AFTER_GROUP"}],
+        ),
+    )
+    assert resp.status_code == 200, resp.text
+    rule = resp.json()["elimination_rules"][0]
+    assert rule["type"] == "N_WRONG"
+    assert rule["n_value"] == 3
+
+
+@pytest.mark.asyncio
+async def test_bottom_percent_out_of_range_rejected(api):
+    oa, contest = await _elimination_contest(api)
+    resp = await api.put(
+        f"/contests/{contest['id']}/configuration",
+        headers=_auth(oa),
+        json=_elimination_cfg(
+            elimination_rules=[{"type": "BOTTOM_X_PERCENT", "percent_value": 150}],
+            checkpoints=[{"type": "AFTER_GROUP"}],
+        ),
+    )
+    assert resp.status_code == 422, resp.text
+
+
+@pytest.mark.asyncio
+async def test_after_question_requires_sequence(api):
+    oa, contest = await _elimination_contest(api)
+    resp = await api.put(
+        f"/contests/{contest['id']}/configuration",
+        headers=_auth(oa),
+        json=_elimination_cfg(
+            elimination_rules=[{"type": "FIRST_WRONG"}],
+            checkpoints=[{"type": "AFTER_QUESTION"}],
+        ),
+    )
+    assert resp.status_code == 422, resp.text
+
+
+@pytest.mark.asyncio
+async def test_patch_replaces_rules_and_checkpoints(api):
+    oa, contest = await _elimination_contest(api)
+    resp = await api.put(
+        f"/contests/{contest['id']}/configuration", headers=_auth(oa), json=_elimination_cfg()
+    )
+    assert resp.status_code == 200, resp.text
+
+    patch = await api.patch(
+        f"/contests/{contest['id']}/configuration",
+        headers=_auth(oa),
+        json={
+            "elimination_rules": [{"type": "MIN_SCORE", "min_score": 50}],
+            "checkpoints": [{"type": "AFTER_GROUP"}],
+        },
+    )
+    assert patch.status_code == 200, patch.text
+    data = patch.json()
+    assert [r["type"] for r in data["elimination_rules"]] == ["MIN_SCORE"]
+    assert data["elimination_rules"][0]["min_score"] == 50
+    assert [c["type"] for c in data["checkpoints"]] == ["AFTER_GROUP"]

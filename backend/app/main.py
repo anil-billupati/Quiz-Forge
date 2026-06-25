@@ -11,7 +11,17 @@ from app.middleware.logging import configure_logging
 from app.middleware.request_logging import RequestLoggingMiddleware
 from app.middleware.tenant_context import TenantContextMiddleware
 from app.observability.tracing import configure_tracing
-from app.routers import auth, configurations, contests, groups, health, organizations, users, wildcards
+from app.routers import (
+    auth,
+    configurations,
+    contests,
+    groups,
+    health,
+    organizations,
+    questions,
+    users,
+    wildcards,
+)
 
 settings = get_settings()
 
@@ -43,6 +53,8 @@ def create_app() -> FastAPI:
     app.include_router(groups.router)
     app.include_router(configurations.router)
     app.include_router(wildcards.router)
+    # Unit 5 — Questions & options (F-authoring).
+    app.include_router(questions.router)
 
     return app
 

@@ -14,6 +14,8 @@ from app.models.group import Group
 from app.models.foundation_probe import FoundationProbe
 from app.models.configuration_block import ConfigurationBlock
 from app.models.wildcard_config import WildcardConfig
+from app.models.elimination import Checkpoint, EliminationRule
+from app.models.question import Option, Question
 
 __all__ = [
     "Base",
@@ -28,4 +30,8 @@ __all__ = [
     "FoundationProbe",
     "ConfigurationBlock",
     "WildcardConfig",
+    "EliminationRule",
+    "Checkpoint",
+    "Question",
+    "Option",
 ]

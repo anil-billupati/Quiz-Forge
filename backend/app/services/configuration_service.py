@@ -21,14 +21,92 @@ from app.models.configuration_block import (
     ConfigurationBlock,
 )
 from app.models.contest import Contest
+from app.models.elimination import Checkpoint, EliminationRule
 from app.schemas.configuration import (
+    CheckpointIn,
     ConfigurationBlockCreate,
     ConfigurationBlockUpdate,
+    EliminationRuleIn,
     FixedScoringConfig,
     TimeBasedScoringConfig,
 )
 from app.services import contest_service, group_service
 from app.observability.method_logging import logged
+
+_N_WRONG_DEFAULT = 3
+
+
+@logged
+def _validate_elimination(
+    mode: str,
+    rules: list[EliminationRuleIn] | None,
+    checkpoints: list[CheckpointIn] | None,
+) -> None:
+    """Enforce BR-4: ELIMINATION needs ≥1 rule + ≥1 checkpoint; others forbid them."""
+    if mode == "ELIMINATION":
+        if not rules:
+            raise AppError(
+                422, "INVALID_ELIMINATION_CONFIG", "ELIMINATION mode requires at least one rule"
+            )
+        if not checkpoints:
+            raise AppError(
+                422,
+                "INVALID_ELIMINATION_CONFIG",
+                "ELIMINATION mode requires at least one checkpoint",
+            )
+        for rule in rules:
+            _validate_rule(rule)
+        for checkpoint in checkpoints:
+            _validate_checkpoint(checkpoint)
+    elif rules or checkpoints:
+        raise AppError(
+            422,
+            "INVALID_ELIMINATION_CONFIG",
+            "elimination_rules/checkpoints are only allowed on ELIMINATION blocks",
+        )
+
+
+def _validate_rule(rule: EliminationRuleIn) -> None:
+    if rule.type == "BOTTOM_X_PERCENT" and rule.percent_value is None:
+        raise AppError(422, "INVALID_RULE", "BOTTOM_X_PERCENT requires percent_value")
+    if rule.type == "MIN_SCORE" and rule.min_score is None:
+        raise AppError(422, "INVALID_RULE", "MIN_SCORE requires min_score")
+
+
+def _validate_checkpoint(checkpoint: CheckpointIn) -> None:
+    if checkpoint.type == "AFTER_QUESTION" and checkpoint.question_sequence is None:
+        raise AppError(422, "INVALID_CHECKPOINT", "AFTER_QUESTION requires question_sequence")
+    if checkpoint.type == "CUSTOM_MILESTONE" and checkpoint.milestone_at is None:
+        raise AppError(422, "INVALID_CHECKPOINT", "CUSTOM_MILESTONE requires milestone_at")
+
+
+def _make_rules(tenant_id: str, rules: list[EliminationRuleIn] | None) -> list[EliminationRule]:
+    return [
+        EliminationRule(
+            id=new_uuid(),
+            tenant_id=tenant_id,
+            type=r.type,
+            n_value=(r.n_value if r.n_value is not None else _N_WRONG_DEFAULT)
+            if r.type == "N_WRONG"
+            else None,
+            percent_value=r.percent_value if r.type == "BOTTOM_X_PERCENT" else None,
+            min_score=r.min_score if r.type == "MIN_SCORE" else None,
+        )
+        for r in (rules or [])
+    ]
+
+
+def _make_checkpoints(tenant_id: str, checkpoints: list[CheckpointIn] | None) -> list[Checkpoint]:
+    return [
+        Checkpoint(
+            id=new_uuid(),
+            tenant_id=tenant_id,
+            type=c.type,
+            question_sequence=c.question_sequence if c.type == "AFTER_QUESTION" else None,
+            milestone_at=c.milestone_at if c.type == "CUSTOM_MILESTONE" else None,
+        )
+        for c in (checkpoints or [])
+    ]
 
 
 @logged
@@ -135,6 +213,7 @@ async def create_or_replace_contest_block(
         raise AppError(
             409, "CONFLICT_NOT_NORMAL", "Contest-scoped blocks apply only to NORMAL contests"
         )
+    _validate_elimination(payload.mode, payload.elimination_rules, payload.checkpoints)
 
     # Delete any existing block so the replacement is idempotent.
     existing = await session.execute(
@@ -154,13 +233,15 @@ async def create_or_replace_contest_block(
         group_id=None,
         **_normalize_config_create(payload),
     )
+    config.elimination_rules = _make_rules(tenant_id, payload.elimination_rules)
+    config.checkpoints = _make_checkpoints(tenant_id, payload.checkpoints)
     session.add(config)
     try:
         await session.commit()
     except IntegrityError as exc:
         await session.rollback()
         raise AppError(409, "CONFLICT", "Configuration block already exists") from exc
-    await session.refresh(config)
+    await session.refresh(config, ["elimination_rules", "checkpoints"])
     return config
 
 
@@ -175,6 +256,7 @@ async def create_or_replace_group_block(
     """Create or replace the ConfigurationBlock for a Group."""
     await _require_draft_contest(session, tenant_id, contest_id)
     await group_service.get_group(session, tenant_id, contest_id, group_id)
+    _validate_elimination(payload.mode, payload.elimination_rules, payload.checkpoints)
 
     existing = await session.execute(
         select(ConfigurationBlock).where(
@@ -192,13 +274,15 @@ async def create_or_replace_group_block(
         group_id=group_id,
         **_normalize_config_create(payload),
     )
+    config.elimination_rules = _make_rules(tenant_id, payload.elimination_rules)
+    config.checkpoints = _make_checkpoints(tenant_id, payload.checkpoints)
     session.add(config)
     try:
         await session.commit()
     except IntegrityError as exc:
         await session.rollback()
         raise AppError(409, "CONFLICT", "Configuration block already exists") from exc
-    await session.refresh(config)
+    await session.refresh(config, ["elimination_rules", "checkpoints"])
     return config
 
 
@@ -249,8 +333,9 @@ async def update_contest_block(
     await _require_draft_contest(session, tenant_id, contest_id)
     block = await get_contest_block(session, tenant_id, contest_id)
     _apply_update(block, payload)
+    _apply_children_update(block, payload)
     await session.commit()
-    await session.refresh(block)
+    await session.refresh(block, ["elimination_rules", "checkpoints"])
     return block
 
 
@@ -265,8 +350,9 @@ async def update_group_block(
     await _require_draft_contest(session, tenant_id, contest_id)
     block = await get_group_block(session, tenant_id, contest_id, group_id)
     _apply_update(block, payload)
+    _apply_children_update(block, payload)
     await session.commit()
-    await session.refresh(block)
+    await session.refresh(block, ["elimination_rules", "checkpoints"])
     return block
 
 
@@ -317,3 +403,41 @@ def _apply_update(block: ConfigurationBlock, payload: ConfigurationBlockUpdate) 
         block.elimination_combine_operator = op
     elif payload.mode is not None and mode != "ELIMINATION":
         block.elimination_combine_operator = None
+
+
+@logged
+def _apply_children_update(block: ConfigurationBlock, payload: ConfigurationBlockUpdate) -> None:
+    """Replace elimination rules/checkpoints on PATCH and re-assert BR-4.
+
+    A provided (non-None) array replaces the existing set; an omitted array is
+    left untouched. The resulting block must satisfy BR-4 for its effective mode.
+    """
+    if block.mode != "ELIMINATION":
+        # Non-elimination blocks carry no rules/checkpoints.
+        if payload.elimination_rules or payload.checkpoints:
+            raise AppError(
+                422,
+                "INVALID_ELIMINATION_CONFIG",
+                "elimination_rules/checkpoints are only allowed on ELIMINATION blocks",
+            )
+        block.elimination_rules.clear()
+        block.checkpoints.clear()
+        return
+
+    if payload.elimination_rules is not None:
+        for rule in payload.elimination_rules:
+            _validate_rule(rule)
+        block.elimination_rules[:] = _make_rules(block.tenant_id, payload.elimination_rules)
+    if payload.checkpoints is not None:
+        for checkpoint in payload.checkpoints:
+            _validate_checkpoint(checkpoint)
+        block.checkpoints[:] = _make_checkpoints(block.tenant_id, payload.checkpoints)
+
+    if not block.elimination_rules:
+        raise AppError(
+            422, "INVALID_ELIMINATION_CONFIG", "ELIMINATION mode requires at least one rule"
+        )
+    if not block.checkpoints:
+        raise AppError(
+            422, "INVALID_ELIMINATION_CONFIG", "ELIMINATION mode requires at least one checkpoint"
+        )

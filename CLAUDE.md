@@ -62,9 +62,9 @@ Units from `docs/plan/delivery-plan.md`. Status: ☐ not started · ◐ in progr
 |---|---|---|
 | 1 | Platform foundation | ☑ |
 | 2 | Tenancy & Identity | ☑ |
-| 3 | Contest authoring — contests, groups & lifecycle | ◐ |
-| 4 | Configuration blocks | ☐ |
-| 5 | Questions & options | ☐ |
+| 3 | Contest authoring — contests, groups & lifecycle | ☑ |
+| 4 | Configuration blocks | ☑ |
+| 5 | Questions & options | ☑ |
 | 6 | Registration | ☐ |
 | 7 | Real-time foundation (WebSocket gateway) | ☐ |
 | 8 | Execution Engine | ☐ |
@@ -79,4 +79,8 @@ Units from `docs/plan/delivery-plan.md`. Status: ☐ not started · ◐ in progr
 | 17 | Resilience, recovery & performance hardening | ☐ |
 | 18 | Frontend (18a admin/authoring, 18b live/participant) | ☐ |
 
-**Next:** `/neutron:feature "Unit 3: Contest authoring — contests, groups & lifecycle"`
+**Next:** `/neutron:feature "Unit 6: Registration"`
+
+> Note: Unit 4 keeps configuration **Draft-only** (locks at PUBLISHED), an
+> accepted deviation from spec BR-5 (which specifies a Registration-Open lock).
+> See `docs/session-log.md` (2026-06-25).

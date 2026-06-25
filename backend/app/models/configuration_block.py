@@ -12,9 +12,10 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, Index, Integer, String, func, text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TenantScoped, new_uuid
+from app.models.elimination import Checkpoint, EliminationRule
 
 MODES = ("STANDARD", "SPEED", "ELIMINATION")
 REVEAL_MODES = ("AUTOMATIC", "MODERATOR_CONTROLLED")
@@ -98,6 +99,15 @@ class ConfigurationBlock(Base, TenantScoped):
 
     # Mode-specific scoring parameters (Fixed vs Time-Based bands/decay).
     scoring_config: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+
+    # ELIMINATION mode children; empty for STANDARD/SPEED. Loaded with the block
+    # and removed with it (BR-4).
+    elimination_rules: Mapped[list[EliminationRule]] = relationship(
+        EliminationRule, cascade="all, delete-orphan", lazy="selectin"
+    )
+    checkpoints: Mapped[list[Checkpoint]] = relationship(
+        Checkpoint, cascade="all, delete-orphan", lazy="selectin"
+    )
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
