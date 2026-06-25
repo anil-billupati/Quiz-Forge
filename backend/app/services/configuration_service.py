@@ -225,6 +225,7 @@ async def create_or_replace_contest_block(
     )
     for row in existing.scalars().all():
         await session.delete(row)
+    await session.flush()
 
     config = ConfigurationBlock(
         id=new_uuid(),
@@ -266,6 +267,7 @@ async def create_or_replace_group_block(
     )
     for row in existing.scalars().all():
         await session.delete(row)
+    await session.flush()
 
     config = ConfigurationBlock(
         id=new_uuid(),

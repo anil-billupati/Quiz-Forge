@@ -12,6 +12,7 @@ from app.dependencies import Principal, db_session, require_roles
 from app.middleware.errors import AppError
 from app.schemas.question import (
     OptionSetReplace,
+    QuestionBulkCreate,
     QuestionCreate,
     QuestionResponse,
     QuestionUpdate,
@@ -38,6 +39,18 @@ async def create_question(
     tenant_id = _require_tenant(principal)
     question = await svc.create_question(session, tenant_id, contest_id, body)
     return QuestionResponse.model_validate(question)
+
+
+@router.post("/bulk", response_model=list[QuestionResponse], status_code=201)
+async def create_questions_bulk(
+    contest_id: str,
+    body: QuestionBulkCreate,
+    principal: Principal = Depends(_org_admin),
+    session: AsyncSession = Depends(db_session),
+) -> list[QuestionResponse]:
+    tenant_id = _require_tenant(principal)
+    questions = await svc.create_questions_bulk(session, tenant_id, contest_id, body)
+    return [QuestionResponse.model_validate(q) for q in questions]
 
 
 @router.get("", response_model=list[QuestionResponse])

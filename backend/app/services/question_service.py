@@ -17,7 +17,13 @@ from app.models.base import new_uuid
 from app.models.contest import Contest
 from app.models.question import Option, Question
 from app.observability.method_logging import logged
-from app.schemas.question import OptionIn, OptionSetReplace, QuestionCreate, QuestionUpdate
+from app.schemas.question import (
+    OptionIn,
+    OptionSetReplace,
+    QuestionBulkCreate,
+    QuestionCreate,
+    QuestionUpdate,
+)
 from app.services import contest_service, group_service
 
 
@@ -98,6 +104,61 @@ async def create_question(
         ) from None
     await session.refresh(question, ["options"])
     return question
+
+
+@logged
+async def create_questions_bulk(
+    session: AsyncSession, tenant_id: str, contest_id: str, payload: QuestionBulkCreate
+) -> list[Question]:
+    """Atomically create multiple questions with their options.
+
+    All questions must be valid for the same contest scope, and no two may
+    share the same sequence within the same uniqueness boundary (contest for
+    Normal, group for Grouped). The whole batch commits or rolls back together.
+    """
+    contest = await _contest_for_mutation(session, tenant_id, contest_id)
+
+    # Pre-validate every item before touching the database so the operation is
+    # atomic and fails fast on malformed input.
+    seen_sequences: set[tuple[str | None, int]] = set()
+    for item in payload.questions:
+        await _validate_scope(session, tenant_id, contest, item.group_id)
+        _validate_options(item.options)
+        key = (item.group_id, item.sequence)
+        if key in seen_sequences:
+            raise AppError(
+                409,
+                "CONFLICT_SEQUENCE",
+                f"Duplicate sequence {item.sequence} in bulk request",
+            )
+        seen_sequences.add(key)
+
+    questions: list[Question] = []
+    for item in payload.questions:
+        question = Question(
+            id=new_uuid(),
+            tenant_id=tenant_id,
+            contest_id=contest_id,
+            group_id=item.group_id,
+            sequence=item.sequence,
+            text=item.text,
+            explanation=item.explanation,
+        )
+        question.options = _build_options(tenant_id, item.options)
+        session.add(question)
+        questions.append(question)
+
+    try:
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        raise AppError(
+            409, "CONFLICT_SEQUENCE", "A question with this sequence already exists"
+        ) from None
+
+    for question in questions:
+        await session.refresh(question, ["options"])
+    return questions
 
 
 @logged

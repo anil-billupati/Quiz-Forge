@@ -155,6 +155,107 @@ async def test_create_list_and_get_question(api):
 
 
 @pytest.mark.asyncio
+async def test_bulk_create_questions(api):
+    oa = await _acme_admin(api)
+    contest = await _create_contest(api, oa)
+
+    resp = await api.post(
+        f"/contests/{contest['id']}/questions/bulk",
+        headers=_auth(oa),
+        json={
+            "questions": [
+                _question(sequence=1, text="Q1"),
+                _question(sequence=2, text="Q2"),
+                _question(sequence=3, text="Q3"),
+            ]
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    data = resp.json()
+    assert len(data) == 3
+    assert [q["sequence"] for q in data] == [1, 2, 3]
+    assert [q["text"] for q in data] == ["Q1", "Q2", "Q3"]
+    assert all(len(q["options"]) == 2 for q in data)
+
+    lst = await api.get(f"/contests/{contest['id']}/questions", headers=_auth(oa))
+    assert lst.status_code == 200
+    assert len(lst.json()) == 3
+
+
+@pytest.mark.asyncio
+async def test_bulk_create_duplicate_sequence_in_payload_rejected(api):
+    oa = await _acme_admin(api)
+    contest = await _create_contest(api, oa)
+
+    resp = await api.post(
+        f"/contests/{contest['id']}/questions/bulk",
+        headers=_auth(oa),
+        json={
+            "questions": [
+                _question(sequence=1, text="First"),
+                _question(sequence=1, text="Duplicate"),
+            ]
+        },
+    )
+    assert resp.status_code == 409, resp.text
+
+    # Nothing should have been persisted.
+    lst = await api.get(f"/contests/{contest['id']}/questions", headers=_auth(oa))
+    assert lst.status_code == 200
+    assert len(lst.json()) == 0
+
+
+@pytest.mark.asyncio
+async def test_bulk_create_atomically_rolls_back_on_existing_sequence(api):
+    oa = await _acme_admin(api)
+    contest = await _create_contest(api, oa)
+    first = await api.post(
+        f"/contests/{contest['id']}/questions",
+        headers=_auth(oa),
+        json=_question(sequence=1, text="Existing"),
+    )
+    assert first.status_code == 201
+
+    resp = await api.post(
+        f"/contests/{contest['id']}/questions/bulk",
+        headers=_auth(oa),
+        json={
+            "questions": [
+                _question(sequence=1, text="Collides"),
+                _question(sequence=2, text="Would be ok alone"),
+            ]
+        },
+    )
+    assert resp.status_code == 409, resp.text
+
+    lst = await api.get(f"/contests/{contest['id']}/questions", headers=_auth(oa))
+    assert lst.status_code == 200
+    assert [q["text"] for q in lst.json()] == ["Existing"]
+
+
+@pytest.mark.asyncio
+async def test_bulk_create_grouped_contest(api):
+    oa = await _acme_admin(api)
+    contest = await _create_contest(api, oa, structure="GROUPED")
+    group = await _create_group(api, oa, contest["id"])
+
+    resp = await api.post(
+        f"/contests/{contest['id']}/questions/bulk",
+        headers=_auth(oa),
+        json={
+            "questions": [
+                _question(sequence=1, text="G1Q1", group_id=group["id"]),
+                _question(sequence=2, text="G1Q2", group_id=group["id"]),
+            ]
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    data = resp.json()
+    assert len(data) == 2
+    assert all(q["group_id"] == group["id"] for q in data)
+
+
+@pytest.mark.asyncio
 async def test_exactly_one_correct_required(api):
     oa = await _acme_admin(api)
     contest = await _create_contest(api, oa)
