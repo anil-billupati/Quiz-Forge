@@ -1,0 +1,12 @@
+[
+  { "email": "alice@example.com", "first_name": "Alice", "last_name": "Anderson" },
+  { "email": "bob@example.com", "first_name": "Bob", "last_name": "Brown" },
+  { "email": "carol@example.com", "first_name": "Carol", "last_name": "Clark" },
+  { "email": "dave@example.com", "first_name": "Dave", "last_name": "Davis" },
+  { "email": "eve@example.com", "first_name": "Eve", "last_name": "Evans" },
+  { "email": "frank@example.com", "first_name": "Frank", "last_name": "Foster" },
+  { "email": "grace@example.com", "first_name": "Grace", "last_name": "Green" },
+  { "email": "henry@example.com", "first_name": "Henry", "last_name": "Harris" },
+  { "email": "ivy@example.com", "first_name": "Ivy", "last_name": "Irwin" },
+  { "email": "jack@example.com", "first_name": "Jack", "last_name": "Jones" }
+]
