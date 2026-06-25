@@ -43,6 +43,10 @@ class OptionSetReplace(BaseModel):
     options: list[OptionIn] = Field(min_length=2)
 
 
+class QuestionBulkCreate(BaseModel):
+    questions: list[QuestionCreate] = Field(min_length=1, max_length=100)
+
+
 class QuestionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

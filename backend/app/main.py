@@ -3,6 +3,8 @@
 Scaffold only — routers and engines are implemented per the delivery plan
 (docs/plan/delivery-plan.md), starting with Unit 1 (Platform foundation).
 """
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
 from app.config import get_settings
@@ -11,12 +13,15 @@ from app.middleware.logging import configure_logging
 from app.middleware.request_logging import RequestLoggingMiddleware
 from app.middleware.tenant_context import TenantContextMiddleware
 from app.observability.tracing import configure_tracing
+from app.realtime.gateway import start_subscriber, stop_subscriber
 from app.routers import (
     auth,
     configurations,
     contests,
+    control,
     groups,
     health,
+    live,
     organizations,
     questions,
     registrations,
@@ -27,12 +32,23 @@ from app.routers import (
 settings = get_settings()
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Cross-instance live fan-out; resilient if Redis is unavailable (Unit 7).
+    await start_subscriber()
+    try:
+        yield
+    finally:
+        await stop_subscriber()
+
+
 def create_app() -> FastAPI:
     configure_logging(settings.log_level)
     app = FastAPI(
         title="ContestForge Core Contest Engine API",
         version="1.0.0",
         description="Multi-tenant live contest engine. See docs/spec/api-contracts.yaml.",
+        lifespan=lifespan,
     )
 
     # Tenant context is established per request (ADR-001); JWT population in Unit 2.
@@ -58,6 +74,10 @@ def create_app() -> FastAPI:
     app.include_router(questions.router)
     # Unit 6 — Registration.
     app.include_router(registrations.router)
+    # Unit 7 — Real-time foundation (WebSocket gateway + live-state).
+    app.include_router(live.router)
+    # Unit 8 — Execution Engine (moderator control endpoints).
+    app.include_router(control.router)
 
     return app
 

@@ -126,6 +126,33 @@ def _question(**overrides) -> dict:
     return q
 
 
+def _question_csv(rows: list[dict]) -> str:
+    """Build a CSV string for the question import endpoint.
+
+    Each row dict may contain: sequence, text, explanation, group_id,
+    option_1..option_10, correct_option.
+    """
+    header = (
+        "sequence,text,explanation,group_id,"
+        "option_1,option_2,option_3,option_4,option_5,"
+        "option_6,option_7,option_8,option_9,option_10,"
+        "correct_option"
+    )
+    lines = [header]
+    for r in rows:
+        cells = [
+            str(r.get("sequence", "")),
+            r.get("text", ""),
+            r.get("explanation", ""),
+            r.get("group_id", ""),
+        ]
+        for i in range(1, 11):
+            cells.append(r.get(f"option_{i}", ""))
+        cells.append(str(r.get("correct_option", "")))
+        lines.append(",".join(cells))
+    return "\n".join(lines)
+
+
 @pytest.mark.asyncio
 async def test_create_list_and_get_question(api):
     oa = await _acme_admin(api)
@@ -152,6 +179,155 @@ async def test_create_list_and_get_question(api):
     )
     assert one.status_code == 200
     assert one.json()["id"] == qid
+
+
+@pytest.mark.asyncio
+async def test_import_questions_csv(api):
+    oa = await _acme_admin(api)
+    contest = await _create_contest(api, oa)
+
+    csv_text = _question_csv(
+        [
+            {
+                "sequence": 1,
+                "text": "What is 2+2?",
+                "explanation": "Basic arithmetic.",
+                "option_1": "3",
+                "option_2": "4",
+                "correct_option": 2,
+            },
+            {
+                "sequence": 2,
+                "text": "Capital of France?",
+                "option_1": "Paris",
+                "option_2": "London",
+                "option_3": "Berlin",
+                "correct_option": 1,
+            },
+        ]
+    )
+    resp = await api.post(
+        f"/contests/{contest['id']}/questions/bulk",
+        headers=_auth(oa),
+        files={"file": ("questions.csv", csv_text, "text/csv")},
+    )
+    assert resp.status_code == 201, resp.text
+    data = resp.json()
+    assert len(data) == 2
+    assert [q["sequence"] for q in data] == [1, 2]
+    assert all(len(q["options"]) >= 2 for q in data)
+    assert sum(1 for o in data[0]["options"] if o["is_correct"]) == 1
+
+    lst = await api.get(f"/contests/{contest['id']}/questions", headers=_auth(oa))
+    assert lst.status_code == 200
+    assert len(lst.json()) == 2
+
+
+@pytest.mark.asyncio
+async def test_import_questions_duplicate_sequence_rejected(api):
+    oa = await _acme_admin(api)
+    contest = await _create_contest(api, oa)
+
+    csv_text = _question_csv(
+        [
+            {"sequence": 1, "text": "First", "option_1": "a", "option_2": "b", "correct_option": 1},
+            {"sequence": 1, "text": "Duplicate", "option_1": "c", "option_2": "d", "correct_option": 1},
+        ]
+    )
+    resp = await api.post(
+        f"/contests/{contest['id']}/questions/bulk",
+        headers=_auth(oa),
+        files={"file": ("questions.csv", csv_text, "text/csv")},
+    )
+    assert resp.status_code == 409, resp.text
+
+    lst = await api.get(f"/contests/{contest['id']}/questions", headers=_auth(oa))
+    assert lst.status_code == 200
+    assert len(lst.json()) == 0
+
+
+@pytest.mark.asyncio
+async def test_import_questions_atomically_rolls_back_on_existing_sequence(api):
+    oa = await _acme_admin(api)
+    contest = await _create_contest(api, oa)
+    first = await api.post(
+        f"/contests/{contest['id']}/questions",
+        headers=_auth(oa),
+        json=_question(sequence=1, text="Existing"),
+    )
+    assert first.status_code == 201
+
+    csv_text = _question_csv(
+        [
+            {"sequence": 1, "text": "Collides", "option_1": "a", "option_2": "b", "correct_option": 1},
+            {"sequence": 2, "text": "Alone", "option_1": "c", "option_2": "d", "correct_option": 1},
+        ]
+    )
+    resp = await api.post(
+        f"/contests/{contest['id']}/questions/bulk",
+        headers=_auth(oa),
+        files={"file": ("questions.csv", csv_text, "text/csv")},
+    )
+    assert resp.status_code == 409, resp.text
+
+    lst = await api.get(f"/contests/{contest['id']}/questions", headers=_auth(oa))
+    assert lst.status_code == 200
+    assert [q["text"] for q in lst.json()] == ["Existing"]
+
+
+@pytest.mark.asyncio
+async def test_import_questions_grouped_contest(api):
+    oa = await _acme_admin(api)
+    contest = await _create_contest(api, oa, structure="GROUPED")
+    group = await _create_group(api, oa, contest["id"])
+
+    csv_text = _question_csv(
+        [
+            {
+                "sequence": 1,
+                "text": "Grouped Q1",
+                "group_id": group["id"],
+                "option_1": "x",
+                "option_2": "y",
+                "correct_option": 1,
+            },
+            {
+                "sequence": 2,
+                "text": "Grouped Q2",
+                "group_id": group["id"],
+                "option_1": "p",
+                "option_2": "q",
+                "correct_option": 2,
+            },
+        ]
+    )
+    resp = await api.post(
+        f"/contests/{contest['id']}/questions/bulk",
+        headers=_auth(oa),
+        files={"file": ("questions.csv", csv_text, "text/csv")},
+    )
+    assert resp.status_code == 201, resp.text
+    data = resp.json()
+    assert len(data) == 2
+    assert all(q["group_id"] == group["id"] for q in data)
+
+
+@pytest.mark.asyncio
+async def test_import_questions_csv_requires_two_options(api):
+    oa = await _acme_admin(api)
+    contest = await _create_contest(api, oa)
+
+    csv_text = _question_csv(
+        [
+            {"sequence": 1, "text": "Too few", "option_1": "only", "correct_option": 1},
+        ]
+    )
+    resp = await api.post(
+        f"/contests/{contest['id']}/questions/bulk",
+        headers=_auth(oa),
+        files={"file": ("questions.csv", csv_text, "text/csv")},
+    )
+    assert resp.status_code == 422, resp.text
 
 
 @pytest.mark.asyncio

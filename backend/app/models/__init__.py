@@ -17,6 +17,7 @@ from app.models.wildcard_config import WildcardConfig
 from app.models.elimination import Checkpoint, EliminationRule
 from app.models.question import Option, Question
 from app.models.registration import Registration
+from app.models.execution import ContestExecutionState, QuestionWindow
 
 __all__ = [
     "Base",
@@ -36,4 +37,6 @@ __all__ = [
     "Question",
     "Option",
     "Registration",
+    "ContestExecutionState",
+    "QuestionWindow",
 ]
