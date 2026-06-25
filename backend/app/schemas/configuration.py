@@ -55,6 +55,38 @@ class TimeBasedScoringConfig(BaseModel):
 ScoringConfig = FixedScoringConfig | TimeBasedScoringConfig
 
 
+class EliminationRuleIn(BaseModel):
+    type: Literal["FIRST_WRONG", "N_WRONG", "BOTTOM_X_PERCENT", "MIN_SCORE"]
+    n_value: int | None = Field(default=None, ge=1)
+    percent_value: float | None = Field(default=None, ge=0, le=100)
+    min_score: int | None = Field(default=None, ge=0)
+
+
+class EliminationRuleResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    type: str
+    n_value: int | None
+    percent_value: float | None
+    min_score: int | None
+
+
+class CheckpointIn(BaseModel):
+    type: Literal["AFTER_QUESTION", "AFTER_GROUP", "CUSTOM_MILESTONE"]
+    question_sequence: int | None = Field(default=None, ge=1)
+    milestone_at: datetime | None = None
+
+
+class CheckpointResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    type: str
+    question_sequence: int | None
+    milestone_at: datetime | None
+
+
 class ConfigurationBlockBase(BaseModel):
     mode: Literal["STANDARD", "SPEED", "ELIMINATION"]
     question_duration_s: int = Field(default=30, ge=5, le=300)
@@ -68,6 +100,8 @@ class ConfigurationBlockBase(BaseModel):
     update_frequency: Literal["PER_ANSWER", "PER_QUESTION", "PER_GROUP"] = "PER_QUESTION"
     survivor_score_reset: bool = False
     elimination_combine_operator: Literal["AND", "OR"] | None = None
+    elimination_rules: list[EliminationRuleIn] | None = None
+    checkpoints: list[CheckpointIn] | None = None
     scoring_config: FixedScoringConfig | TimeBasedScoringConfig | None = None
 
     @model_validator(mode="after")
@@ -100,6 +134,8 @@ class ConfigurationBlockUpdate(BaseModel):
     update_frequency: Literal["PER_ANSWER", "PER_QUESTION", "PER_GROUP"] | None = None
     survivor_score_reset: bool | None = None
     elimination_combine_operator: Literal["AND", "OR"] | None = None
+    elimination_rules: list[EliminationRuleIn] | None = None
+    checkpoints: list[CheckpointIn] | None = None
     scoring_config: FixedScoringConfig | TimeBasedScoringConfig | None = None
 
 
@@ -123,6 +159,8 @@ class ConfigurationBlockResponse(BaseModel):
     scoring_model: str
     elimination_combine_operator: str | None
     survivor_score_reset: bool
+    elimination_rules: list[EliminationRuleResponse] = []
+    checkpoints: list[CheckpointResponse] = []
     scoring_config: dict
     created_at: datetime
     updated_at: datetime
@@ -134,6 +172,10 @@ __all__ = [
     "ConfigurationBlockCreate",
     "ConfigurationBlockUpdate",
     "ConfigurationBlockResponse",
+    "EliminationRuleIn",
+    "EliminationRuleResponse",
+    "CheckpointIn",
+    "CheckpointResponse",
     "TimeBand",
     "DecayConfig",
     "FixedScoringConfig",

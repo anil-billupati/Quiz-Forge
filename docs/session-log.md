@@ -484,3 +484,37 @@ spec, and technical spec.
 ### Status
 - CLAUDE.md: Unit 2 → ☑ complete. Next: Unit 3 (Contest authoring).
 - Suggest `/neutron:review` before raising a PR.
+
+## 2026-06-25 — Unit 4 completion: Elimination configuration
+
+**Command:** manual implementation (plan-mode approved)
+
+### What was built
+- New entities `EliminationRule` + `Checkpoint` (`app/models/elimination.py`),
+  children of `ConfigurationBlock` (selectin relationships, cascade delete-orphan).
+- Nested elimination arrays added to the existing config endpoints
+  (`PUT/PATCH/GET /contests/{id}/configuration` + group variants) via
+  `app/schemas/configuration.py`; no new routes (per api-contracts.yaml).
+- BR-4 enforced in `configuration_service`: ELIMINATION requires ≥1 rule, ≥1
+  checkpoint, and a non-null `elimination_combine_operator`; non-ELIMINATION
+  blocks reject rules/checkpoints (422). Per-rule/checkpoint validation;
+  `N_WRONG` defaults `n_value` to 3.
+- Migration `0008_elimination_config` (tables, FKs, type CHECK constraints,
+  tenant/block indexes); applied + down/up exercised on Postgres.
+
+### Verification
+- 47/47 integration tests pass (9 new elimination tests; updated the prior
+  `test_group_configuration` which had asserted the pre-BR-4 behavior). The 2
+  Docker-only testcontainer tests deselected when run via local venv.
+- `alembic upgrade head` / `downgrade -1` / `upgrade head` clean.
+
+### Accepted deviation from spec (BR-5)
+- Configuration remains **Draft-only** (locks at PUBLISHED). Spec BR-5 says
+  configuration should lock at **REGISTRATION_OPEN** (editable while PUBLISHED).
+  Per team decision we keep the stricter current behavior; elimination writes
+  reuse the existing `_require_draft_contest` gate. Specs in `docs/spec/` still
+  describe the Registration-Open lock — revisit if the team wants to align.
+
+### Out of scope (later units)
+- Elimination runtime (`EliminationEvent`, checkpoint evaluation,
+  `GET /contests/{id}/eliminations`) → Unit 13.
