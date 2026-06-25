@@ -66,8 +66,8 @@ Units from `docs/plan/delivery-plan.md`. Status: ☐ not started · ◐ in progr
 | 4 | Configuration blocks | ☑ |
 | 5 | Questions & options | ☑ |
 | 6 | Registration | ☑ |
-| 7 | Real-time foundation (WebSocket gateway) | ☐ |
-| 8 | Execution Engine | ☐ |
+| 7 | Real-time foundation (WebSocket gateway) | ☑ |
+| 8 | Execution Engine | ☑ |
 | 9 | Answer submission & durability | ☐ |
 | 10 | Scoring Engine | ☐ |
 | 11 | Wildcard runtime | ☐ |
@@ -79,7 +79,7 @@ Units from `docs/plan/delivery-plan.md`. Status: ☐ not started · ◐ in progr
 | 17 | Resilience, recovery & performance hardening | ☐ |
 | 18 | Frontend (18a admin/authoring, 18b live/participant) | ☐ |
 
-**Next:** `/neutron:feature "Unit 7: Real-time foundation (WebSocket gateway)"`
+**Next:** `/neutron:feature "Unit 9: Answer submission & durability"`
 
 > Note: Unit 4 keeps configuration **Draft-only** (locks at PUBLISHED), an
 > accepted deviation from spec BR-5 (which specifies a Registration-Open lock).
