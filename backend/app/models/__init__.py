@@ -16,6 +16,7 @@ from app.models.configuration_block import ConfigurationBlock
 from app.models.wildcard_config import WildcardConfig
 from app.models.elimination import Checkpoint, EliminationRule
 from app.models.question import Option, Question
+from app.models.registration import Registration
 
 __all__ = [
     "Base",
@@ -34,4 +35,5 @@ __all__ = [
     "Checkpoint",
     "Question",
     "Option",
+    "Registration",
 ]

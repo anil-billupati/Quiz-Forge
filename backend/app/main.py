@@ -19,6 +19,7 @@ from app.routers import (
     health,
     organizations,
     questions,
+    registrations,
     users,
     wildcards,
 )
@@ -55,6 +56,8 @@ def create_app() -> FastAPI:
     app.include_router(wildcards.router)
     # Unit 5 — Questions & options (F-authoring).
     app.include_router(questions.router)
+    # Unit 6 — Registration.
+    app.include_router(registrations.router)
 
     return app
 
