@@ -5,7 +5,7 @@ option correctness; participant-facing runtime payloads omit it (later units).
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, File, Response, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import Principal, db_session, require_roles
@@ -18,6 +18,7 @@ from app.schemas.question import (
     QuestionUpdate,
 )
 from app.services import question_service as svc
+from app.utils.question_import import parse_question_csv
 
 router = APIRouter(prefix="/contests/{contest_id}/questions", tags=["Questions"])
 _org_admin = require_roles("ORG_ADMIN")
@@ -42,13 +43,28 @@ async def create_question(
 
 
 @router.post("/bulk", response_model=list[QuestionResponse], status_code=201)
-async def create_questions_bulk(
+async def import_questions(
     contest_id: str,
-    body: QuestionBulkCreate,
+    file: UploadFile = File(...),
     principal: Principal = Depends(_org_admin),
     session: AsyncSession = Depends(db_session),
 ) -> list[QuestionResponse]:
+    """Import questions for a Draft contest from a CSV file.
+
+    CSV columns: sequence, text, explanation (optional), group_id (optional),
+    option_1 ... option_10, correct_option (1-based index).
+    The import is atomic: all rows must be valid or none are persisted.
+    """
     tenant_id = _require_tenant(principal)
+    if file.content_type not in ("text/csv", "application/vnd.ms-excel", None):
+        raise AppError(415, "UNSUPPORTED_MEDIA_TYPE", "Only CSV files are supported")
+    try:
+        text = (await file.read()).decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise AppError(422, "INVALID_CSV", "CSV must be UTF-8 encoded") from exc
+
+    rows = parse_question_csv(text)
+    body = QuestionBulkCreate(questions=[QuestionCreate(**r) for r in rows])
     questions = await svc.create_questions_bulk(session, tenant_id, contest_id, body)
     return [QuestionResponse.model_validate(q) for q in questions]
 
