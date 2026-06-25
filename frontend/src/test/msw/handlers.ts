@@ -13,7 +13,7 @@ import { http, HttpResponse } from "msw";
 const BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/v1";
 const url = (p: string) => `${BASE}${p}`;
 
-const ok = <T>(body: T, status = 200) => HttpResponse.json(body, { status });
+const ok = <T>(body: T, status = 200) => HttpResponse.json(body as never, { status });
 const err = (code: string, message: string, status: number, details = {}) =>
   HttpResponse.json({ error: { code, message, details } }, { status });
 
