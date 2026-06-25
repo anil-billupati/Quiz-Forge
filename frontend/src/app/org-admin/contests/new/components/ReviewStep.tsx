@@ -1,7 +1,9 @@
 "use client";
 
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, Users } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 import type { ContestFormState } from "../types";
 
 interface ReviewStepProps {
@@ -47,6 +49,13 @@ export default function ReviewStep({ data, contestId }: ReviewStepProps) {
     data.structure === "NORMAL"
       ? data.config.default
       : data.config.byGroup[data.groups[0]] ?? data.config.default;
+
+  const requiresModerator =
+    data.config.default.revealMode === "MODERATOR_CONTROLLED" ||
+    (data.structure === "GROUPED" &&
+      Object.values(data.config.byGroup).some(
+        (c) => c.revealMode === "MODERATOR_CONTROLLED"
+      ));
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-6">
@@ -130,6 +139,50 @@ export default function ReviewStep({ data, contestId }: ReviewStepProps) {
           </span>
         </div>
       </div>
+
+      <div className="py-4">
+        <span className="text-slate-500">Moderators</span>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          {data.moderators.length > 0 ? (
+            data.moderators.map((moderator) => (
+              <div
+                key={moderator.id}
+                className={cn(
+                  "flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm",
+                  moderator.isNewlyCreated
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                    : "border-slate-200 bg-slate-50 text-slate-700"
+                )}
+              >
+                <Users className="size-3.5" />
+                <span className="font-medium">
+                  {moderator.first_name} {moderator.last_name}
+                </span>
+                {moderator.isNewlyCreated && (
+                  <Badge
+                    variant="outline"
+                    className="border-emerald-200 text-emerald-700"
+                  >
+                    Invite sent
+                  </Badge>
+                )}
+              </div>
+            ))
+          ) : (
+            <span className="text-sm text-slate-500">No moderators assigned</span>
+          )}
+        </div>
+      </div>
+
+      {requiresModerator && data.moderators.length === 0 && (
+        <Alert variant="destructive" className="mt-2">
+          <AlertTriangle className="size-4" />
+          <AlertDescription>
+            At least one moderator is required for Moderator Controlled reveal mode.
+            Go back to the Moderators step to assign one.
+          </AlertDescription>
+        </Alert>
+      )}
 
       <Alert className="mt-4 border-amber-200 bg-amber-50 text-amber-900">
         <AlertTriangle className="size-4 text-amber-600" />

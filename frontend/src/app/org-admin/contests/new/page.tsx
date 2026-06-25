@@ -16,11 +16,13 @@ import {
 } from "@/lib/api/contests";
 import { createGroup } from "@/lib/api/groups";
 import { setGroupConfiguration } from "@/lib/api/configurations";
+import { assignContestModerators } from "@/lib/api/moderators";
 import { formConfigToBlockRequest } from "@/lib/contest-config";
 import WizardStepper from "./components/WizardStepper";
 import ContestInfoStep from "./components/ContestInfoStep";
 import StructureStep from "./components/StructureStep";
 import ConfigurationStep from "./components/ConfigurationStep";
+import ModeratorsStep from "./components/ModeratorsStep";
 import QuestionsStep from "./components/QuestionsStep";
 import ReviewStep from "./components/ReviewStep";
 import {
@@ -34,6 +36,7 @@ const steps = [
   "Contest Info",
   "Structure",
   "Configuration",
+  "Moderators",
   "Questions",
   "Review & Publish",
 ];
@@ -52,6 +55,8 @@ function getInitialState(): ContestFormState {
       default: { ...defaultConfiguration },
       byGroup: {},
     },
+    moderators: [],
+    newModeratorIds: [],
     questions: [],
   };
 }
@@ -144,6 +149,19 @@ export default function CreateContestPage() {
       }
     }
 
+    if (currentStep === 4) {
+      const requiresModerator =
+        form.config.default.revealMode === "MODERATOR_CONTROLLED" ||
+        (form.structure === "GROUPED" &&
+          Object.values(form.config.byGroup).some(
+            (c) => c.revealMode === "MODERATOR_CONTROLLED"
+          ));
+      if (requiresModerator && form.moderators.length === 0) {
+        nextErrors.moderators =
+          "At least one moderator is required for Moderator Controlled reveal mode.";
+      }
+    }
+
     setErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
   };
@@ -225,6 +243,34 @@ export default function CreateContestPage() {
     }
   };
 
+  const handleAssignModerators = async (): Promise<boolean> => {
+    if (!validateStep(step)) return false;
+    if (!contestId) {
+      setApiError("Contest has not been created yet.");
+      return false;
+    }
+
+    setIsLoading(true);
+    setApiError(null);
+
+    try {
+      // TODO: replace stub with real API when backend supports contest-level
+      // moderator assignment.
+      await assignContestModerators(
+        contestId,
+        form.moderators.map((m) => m.id)
+      );
+      return true;
+    } catch (err) {
+      setApiError(
+        err instanceof Error ? err.message : "Failed to assign moderators."
+      );
+      return false;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleNext = async () => {
     setApiError(null);
 
@@ -238,7 +284,12 @@ export default function CreateContestPage() {
       if (!saved) return;
     }
 
-    if (step !== 2 && step !== 3 && !validateStep(step)) {
+    if (step === 4) {
+      const assigned = await handleAssignModerators();
+      if (!assigned) return;
+    }
+
+    if (![2, 3, 4].includes(step) && !validateStep(step)) {
       return;
     }
 
@@ -253,6 +304,19 @@ export default function CreateContestPage() {
   const handlePublish = async () => {
     if (!contestId) {
       setApiError("Contest has not been created yet.");
+      return;
+    }
+
+    const requiresModerator =
+      form.config.default.revealMode === "MODERATOR_CONTROLLED" ||
+      (form.structure === "GROUPED" &&
+        Object.values(form.config.byGroup).some(
+          (c) => c.revealMode === "MODERATOR_CONTROLLED"
+        ));
+    if (requiresModerator && form.moderators.length === 0) {
+      setApiError(
+        "At least one moderator is required for Moderator Controlled reveal mode before publishing."
+      );
       return;
     }
 
@@ -298,6 +362,13 @@ export default function CreateContestPage() {
 
   const updateQuestions = (questions: ContestFormState["questions"]) => {
     setForm((prev) => ({ ...prev, questions }));
+  };
+
+  const updateModerators = (
+    moderators: ContestFormState["moderators"],
+    newModeratorIds: ContestFormState["newModeratorIds"]
+  ) => {
+    setForm((prev) => ({ ...prev, moderators, newModeratorIds }));
   };
 
   return (
@@ -353,6 +424,15 @@ export default function CreateContestPage() {
           />
         )}
         {step === 4 && (
+          <ModeratorsStep
+            revealMode={form.config.default.revealMode}
+            selected={form.moderators}
+            newModeratorIds={form.newModeratorIds}
+            errors={errors}
+            onChange={updateModerators}
+          />
+        )}
+        {step === 5 && (
           <QuestionsStep
             structure={form.structure}
             groups={form.groups}
@@ -360,7 +440,7 @@ export default function CreateContestPage() {
             onChange={updateQuestions}
           />
         )}
-        {step === 5 && <ReviewStep data={form} contestId={contestId} />}
+        {step === 6 && <ReviewStep data={form} contestId={contestId} />}
       </div>
 
       {/* Footer actions */}

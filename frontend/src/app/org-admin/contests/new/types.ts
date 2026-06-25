@@ -45,6 +45,15 @@ export interface ContestQuestion {
   group?: string;
 }
 
+export interface ContestModerator {
+  id: string;
+  email: string;
+  first_name: string;
+  last_name: string;
+  status: string;
+  isNewlyCreated?: boolean;
+}
+
 export interface ContestFormState {
   info: {
     name: string;
@@ -58,6 +67,8 @@ export interface ContestFormState {
     default: ContestConfiguration;
     byGroup: Record<string, ContestConfiguration>;
   };
+  moderators: ContestModerator[];
+  newModeratorIds: string[];
   questions: ContestQuestion[];
 }
 
