@@ -56,6 +56,13 @@ async def zrevrange_withscores(
     return await redis_client.zrevrange(key, start, stop, withscores=True)
 
 
+async def zrange_withscores(
+    key: str, start: int = 0, stop: int = -1
+) -> list[tuple[str, float]]:
+    """Return members and scores in ascending score order."""
+    return await redis_client.zrange(key, start, stop, withscores=True)
+
+
 async def zscore(key: str, member: str) -> float | None:
     """Return the score of a member, or None if absent."""
     return await redis_client.zscore(key, member)
