@@ -444,6 +444,7 @@ export default function CreateContestPage() {
         )}
         {currentLabel === "Questions" && (
           <QuestionsStep
+            contestId={contestId}
             structure={form.structure}
             groups={form.groups}
             questions={form.questions}

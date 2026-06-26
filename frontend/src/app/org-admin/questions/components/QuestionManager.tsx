@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Plus, AlertCircle } from "lucide-react";
+import { Plus, Upload, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
@@ -24,6 +24,7 @@ import {
 } from "@/lib/api/questions";
 import { listGroups } from "@/lib/api/groups";
 import { isDraft } from "@/lib/contest-status";
+import QuestionBulkImportDialog from "@/app/org-admin/contests/new/components/QuestionBulkImportDialog";
 import QuestionForm, { type QuestionFormValues } from "./QuestionForm";
 import QuestionList from "./QuestionList";
 
@@ -45,6 +46,7 @@ export default function QuestionManager({ contest }: QuestionManagerProps) {
   const [dialogMode, setDialogMode] = useState<DialogMode>(null);
   const [activeQuestion, setActiveQuestion] = useState<QuestionResponse | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
 
   const defaultSequence = useMemo(() => {
     if (questions.length === 0) return 1;
@@ -167,13 +169,23 @@ export default function QuestionManager({ contest }: QuestionManagerProps) {
           </p>
         </div>
         {editable && (
-          <Button
-            onClick={handleCreate}
-            className="gap-1.5 bg-[#f05a22] hover:bg-[#d94d1a]"
-          >
-            <Plus className="size-4" />
-            Add Question
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setImportDialogOpen(true)}
+              className="gap-1.5"
+            >
+              <Upload className="size-4" />
+              Bulk Import
+            </Button>
+            <Button
+              onClick={handleCreate}
+              className="gap-1.5 bg-[#f05a22] hover:bg-[#d94d1a]"
+            >
+              <Plus className="size-4" />
+              Add Question
+            </Button>
+          </div>
         )}
       </div>
 
@@ -250,6 +262,16 @@ export default function QuestionManager({ contest }: QuestionManagerProps) {
           </div>
         </DialogContent>
       </Dialog>
+
+      <QuestionBulkImportDialog
+        contestId={contest.id}
+        open={importDialogOpen}
+        onOpenChange={setImportDialogOpen}
+        onSuccess={async () => {
+          setImportDialogOpen(false);
+          await load();
+        }}
+      />
     </div>
   );
 }

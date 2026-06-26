@@ -114,6 +114,7 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
         const body = await retry.json().catch(() => ({}));
         throw new Error(body?.error?.message ?? `Request failed: ${retry.status}`);
       }
+      if (retry.status === 204) return undefined as T;
       return retry.json() as Promise<T>;
     }
     throw new Error("Session expired. Please sign in again.");
@@ -123,5 +124,6 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
     const body = await res.json().catch(() => ({}));
     throw new Error(body?.error?.message ?? `Request failed: ${res.status}`);
   }
+  if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
 }

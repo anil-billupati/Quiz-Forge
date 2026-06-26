@@ -23,11 +23,12 @@ export default function ParticipantLeaderboardPage() {
           <Medal className="size-8 text-[#f05a22]" />
         </div>
         <h3 className="mt-6 text-lg font-semibold text-[#1f2335]">
-          Leaderboard coming soon
+          Leaderboard not available yet
         </h3>
         <p className="mt-2 max-w-sm text-sm text-slate-500">
-          Live rankings and results will appear here once the leaderboard APIs are
-          available.
+          Live rankings appear inside the contest view while a contest is live.
+          Final results and detailed leaderboards will be available once the
+          backend leaderboard and results APIs are delivered.
         </p>
         <Button
           asChild
