@@ -73,9 +73,16 @@ async def create_contest(
 
 @logged
 async def list_contests(
-    session: AsyncSession, tenant_id: str, *, status: str | None, limit: int
+    session: AsyncSession,
+    tenant_id: str,
+    *,
+    status: str | None,
+    limit: int,
+    is_participant: bool = False,
 ) -> list[Contest]:
     stmt = select(Contest).where(Contest.tenant_id == tenant_id)
+    if is_participant:
+        stmt = stmt.where(Contest.lifecycle_status != "DRAFT")
     if status:
         stmt = stmt.where(Contest.lifecycle_status == status)
     stmt = stmt.order_by(Contest.created_at).limit(limit)

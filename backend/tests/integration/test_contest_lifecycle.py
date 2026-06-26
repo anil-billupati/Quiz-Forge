@@ -216,3 +216,72 @@ async def test_rbac_participant_cannot_create_contest(api):
     pl = await _login(api, "p@acme.com", "player-pw-123", tenant_slug="acme")
     resp = await api.post("/contests", headers=_auth(pl), json={"name": "X", "structure": "NORMAL"})
     assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_participant_can_browse_visible_contests(api):
+    oa = await _org_admin(api, "acme", "admin@acme.com")
+    await api.post(
+        "/users",
+        headers=_auth(oa),
+        json={
+            "email": "p@acme.com",
+            "first_name": "P",
+            "last_name": "P",
+            "role": "PARTICIPANT",
+            "password": "player-pw-123",
+        },
+    )
+    pl = await _login(api, "p@acme.com", "player-pw-123", tenant_slug="acme")
+
+    draft = await _create_contest(api, oa, name="Draft Cup", structure="NORMAL")
+    published = await _create_contest(api, oa, name="Open Cup", structure="NORMAL")
+    await api.post(
+        f"/contests/{published['id']}/lifecycle",
+        headers=_auth(oa),
+        json={"target_status": "PUBLISHED"},
+    )
+
+    resp = await api.get("/contests", headers=_auth(pl))
+    assert resp.status_code == 200, resp.text
+    visible = resp.json()
+    assert all(c["name"] != "Draft Cup" for c in visible)
+    assert any(c["name"] == "Open Cup" for c in visible)
+
+
+@pytest.mark.asyncio
+async def test_participant_browse_is_tenant_isolated(api):
+    oa_acme = await _org_admin(api, "acme", "admin@acme.com")
+    oa_globex = await _org_admin(api, "globex", "admin@globex.com")
+
+    await api.post(
+        "/users",
+        headers=_auth(oa_acme),
+        json={
+            "email": "p@acme.com",
+            "first_name": "P",
+            "last_name": "P",
+            "role": "PARTICIPANT",
+            "password": "player-pw-123",
+        },
+    )
+    pl = await _login(api, "p@acme.com", "player-pw-123", tenant_slug="acme")
+
+    acme_pub = await _create_contest(api, oa_acme, name="Acme Open", structure="NORMAL")
+    await api.post(
+        f"/contests/{acme_pub['id']}/lifecycle",
+        headers=_auth(oa_acme),
+        json={"target_status": "PUBLISHED"},
+    )
+    globex_pub = await _create_contest(api, oa_globex, name="Globex Open", structure="NORMAL")
+    await api.post(
+        f"/contests/{globex_pub['id']}/lifecycle",
+        headers=_auth(oa_globex),
+        json={"target_status": "PUBLISHED"},
+    )
+
+    resp = await api.get("/contests", headers=_auth(pl))
+    assert resp.status_code == 200, resp.text
+    names = {c["name"] for c in resp.json()}
+    assert "Acme Open" in names
+    assert "Globex Open" not in names

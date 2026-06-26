@@ -22,8 +22,10 @@ from app.realtime.gateway import add_presence, manager, remove_presence
 from app.realtime.tickets import ticket_store
 from app.schemas.answer import AnswerSubmit
 from app.schemas.live import LiveStateResponse, LiveTicketResponse
+from app.schemas.wildcard import WildcardActivate
 from app.services import answer_service
 from app.services import live_service as svc
+from app.services import wildcard_runtime_service
 
 router = APIRouter(tags=["Live"])
 _member = require_roles("ORG_ADMIN", "MODERATOR", "PARTICIPANT")
@@ -88,7 +90,7 @@ async def live_channel(
 
     # Echo the offered subprotocol so browsers complete the handshake.
     await websocket.accept(subprotocol=f"ticket.{ticket_value}")
-    await manager.connect(contest_id, websocket)
+    await manager.connect(contest_id, websocket, user_id=payload.user_id, role=payload.role)
     await add_presence(contest_id, payload.user_id)
     await websocket.send_json({"event": "connection.ready", "contest_id": contest_id})
 
@@ -112,8 +114,8 @@ async def _handle_action(
     message: dict,
 ) -> None:
     """Handle client→server actions. Unit 7 supports heartbeat; Unit 9 adds
-    answer.submit; richer actions (wildcard.activate, moderator.*) arrive in
-    later units.
+    answer.submit; Unit 11 adds wildcard.activate; moderator.* arrive in later
+    units.
     """
     action = message.get("action")
     if action == "ping":
@@ -152,6 +154,39 @@ async def _handle_action(
                 "reason": exc.code.lower(),
             }
         await websocket.send_json(ack)
+        return
+
+    if action == "wildcard.activate":
+        try:
+            body = WildcardActivate.model_validate(message)
+            result = await wildcard_runtime_service.activate_wildcard(
+                session,
+                ticket_payload.tenant_id,
+                ticket_payload.contest_id,
+                ticket_payload.user_id,
+                body.question_id,
+                body.type,
+            )
+        except (ValidationError, RequestValidationError) as exc:
+            result = {
+                "event": "wildcard.applied",
+                "type": message.get("type"),
+                "question_id": message.get("question_id"),
+                "accepted": False,
+                "reason": "validation_error",
+                "details": str(exc),
+            }
+        except AppError as exc:
+            # Rejections (not enabled / not eligible / already used / wrong state)
+            # surface as a rejected wildcard.applied without dropping the socket.
+            result = {
+                "event": "wildcard.applied",
+                "type": message.get("type"),
+                "question_id": message.get("question_id"),
+                "accepted": False,
+                "reason": exc.code.lower(),
+            }
+        await websocket.send_json(result)
         return
 
     await websocket.send_json(

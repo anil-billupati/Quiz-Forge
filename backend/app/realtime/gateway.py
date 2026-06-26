@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
+from collections.abc import Callable
 from typing import Any
 
 import structlog
@@ -37,19 +38,32 @@ def _presence_key(contest_id: str) -> str:
 
 
 class ConnectionManager:
-    """In-process registry of live connections, grouped per contest."""
+    """In-process registry of live connections, grouped per contest.
+
+    Each socket is annotated with the authenticated user id so that ``MASKED``
+    leaderboard pushes can deliver a personalized payload per participant.
+    """
 
     def __init__(self) -> None:
         self._rooms: dict[str, set[WebSocket]] = {}
+        self._meta: dict[WebSocket, dict[str, Any]] = {}
 
-    async def connect(self, contest_id: str, websocket: WebSocket) -> None:
+    async def connect(
+        self,
+        contest_id: str,
+        websocket: WebSocket,
+        user_id: str | None = None,
+        role: str | None = None,
+    ) -> None:
         self._rooms.setdefault(contest_id, set()).add(websocket)
+        self._meta[websocket] = {"user_id": user_id, "role": role}
 
     def disconnect(self, contest_id: str, websocket: WebSocket) -> None:
         room = self._rooms.get(contest_id)
         if room is None:
             return
         room.discard(websocket)
+        self._meta.pop(websocket, None)
         if not room:
             self._rooms.pop(contest_id, None)
 
@@ -65,6 +79,32 @@ class ConnectionManager:
 
     def local_count(self, contest_id: str) -> int:
         return len(self._rooms.get(contest_id, ()))
+
+    def connections(self, contest_id: str) -> list[tuple[WebSocket, dict[str, Any]]]:
+        """Return all connected sockets in a contest with their metadata."""
+        return [
+            (ws, self._meta.get(ws, {}))
+            for ws in self._rooms.get(contest_id, ())
+        ]
+
+    async def broadcast_personalized(
+        self,
+        contest_id: str,
+        payload_fn: Callable[[dict[str, Any]], dict[str, Any]],
+    ) -> None:
+        """Send a per-socket payload computed from the socket's metadata.
+
+        Used by MASKED leaderboard visibility so each participant receives only
+        their own entry while admins/moderators can still receive the full board.
+        """
+        dead: list[WebSocket] = []
+        for websocket, meta in self.connections(contest_id):
+            try:
+                await websocket.send_json(payload_fn(meta))
+            except Exception:
+                dead.append(websocket)
+        for websocket in dead:
+            self.disconnect(contest_id, websocket)
 
 
 manager = ConnectionManager()

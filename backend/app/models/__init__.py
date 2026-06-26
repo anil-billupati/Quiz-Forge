@@ -20,6 +20,7 @@ from app.models.registration import Registration
 from app.models.execution import ContestExecutionState, QuestionWindow
 from app.models.answer import AnswerSubmission, OutboxEvent
 from app.models.score import Score
+from app.models.wildcard_activation import WildcardActivation
 
 __all__ = [
     "Base",
@@ -44,4 +45,5 @@ __all__ = [
     "AnswerSubmission",
     "OutboxEvent",
     "Score",
+    "WildcardActivation",
 ]
