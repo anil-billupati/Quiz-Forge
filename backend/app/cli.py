@@ -21,6 +21,7 @@ from app.db import SessionLocal
 from app.models.base import new_uuid
 from app.models.user import User
 from app.security.passwords import hash_password
+from app.services import answer_service
 
 
 async def _seed_super_admin(email: str, password: str, first: str, last: str) -> str:
@@ -60,7 +61,17 @@ def seed_superadmin() -> None:
     print(asyncio.run(_seed_super_admin(email, password, first, last)))
 
 
-COMMANDS = {"seed-superadmin": seed_superadmin}
+async def _redrive_outbox() -> int:
+    async with SessionLocal() as session:
+        return await answer_service.redrive_pending_outbox(session)
+
+
+def redrive_outbox() -> None:
+    published = asyncio.run(_redrive_outbox())
+    print(f"Re-driven {published} pending outbox event(s).")
+
+
+COMMANDS = {"seed-superadmin": seed_superadmin, "redrive-outbox": redrive_outbox}
 
 
 def main() -> None:
