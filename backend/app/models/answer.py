@@ -54,8 +54,10 @@ class AnswerSubmission(Base, TenantScoped):
     registration_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("registration.id"), nullable=False
     )
-    selected_option_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("option.id"), nullable=False
+    # Nullable for skip/timeout: a SKIPPED answer has no selected option (FR-25,
+    # domain-model AnswerSubmission).
+    selected_option_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("option.id"), nullable=True
     )
     attempt_no: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     idempotency_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)

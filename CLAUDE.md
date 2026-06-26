@@ -7,7 +7,7 @@
 | **Stack** | Python + FastAPI · Next.js + TypeScript · PostgreSQL + Redis |
 | **Cloud** | AWS (deployment-agnostic containers) |
 | **Team** | contest (Lead: Hussain) |
-| **Last updated** | 2026-06-22 |
+| **Last updated** | 2026-06-26 |
 
 ## What this is
 
@@ -70,7 +70,7 @@ Units from `docs/plan/delivery-plan.md`. Status: ☐ not started · ◐ in progr
 | 8 | Execution Engine | ☑ |
 | 9 | Answer submission & durability | ☑ |
 | 10 | Scoring Engine | ☑ |
-| 11 | Wildcard runtime | ☐ |
+| 11 | Wildcard runtime | ☑ |
 | 12 | Leaderboard Engine | ☐ |
 | 13 | Elimination Engine | ☐ |
 | 14 | Notifications | ☐ |
@@ -79,7 +79,7 @@ Units from `docs/plan/delivery-plan.md`. Status: ☐ not started · ◐ in progr
 | 17 | Resilience, recovery & performance hardening | ☐ |
 | 18 | Frontend (18a admin/authoring, 18b live/participant) | ☐ |
 
-**Next:** `/neutron:feature "Unit 11: Wildcard runtime"` (or Unit 12: Leaderboard Engine — both depend on Unit 10)
+**Next:** `/neutron:feature "Unit 12: Leaderboard Engine"`
 
 > Note: Unit 4 keeps configuration **Draft-only** (locks at PUBLISHED), an
 > accepted deviation from spec BR-5 (which specifies a Registration-Open lock).

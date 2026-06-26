@@ -21,6 +21,7 @@ from app.routers import (
     control,
     groups,
     health,
+    leaderboard,
     live,
     organizations,
     questions,
@@ -78,6 +79,8 @@ def create_app() -> FastAPI:
     app.include_router(live.router)
     # Unit 8 — Execution Engine (moderator control endpoints).
     app.include_router(control.router)
+    # Unit 12 — Leaderboard Engine.
+    app.include_router(leaderboard.router)
 
     return app
 

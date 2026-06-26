@@ -16,6 +16,7 @@ from app.services import contest_service as svc
 
 router = APIRouter(prefix="/contests", tags=["Contests"])
 _org_admin = require_roles("ORG_ADMIN")
+_browse = require_roles("ORG_ADMIN", "PARTICIPANT")
 
 
 def _require_tenant(principal: Principal) -> str:
@@ -39,11 +40,14 @@ async def create_contest(
 async def list_contests(
     status: str | None = Query(None),
     limit: int = Query(50, ge=1, le=200),
-    principal: Principal = Depends(_org_admin),
+    principal: Principal = Depends(_browse),
     session: AsyncSession = Depends(db_session),
 ) -> list[ContestOut]:
     tenant_id = _require_tenant(principal)
-    contests = await svc.list_contests(session, tenant_id, status=status, limit=limit)
+    is_participant = principal.role == "PARTICIPANT"
+    contests = await svc.list_contests(
+        session, tenant_id, status=status, limit=limit, is_participant=is_participant
+    )
     return [ContestOut.model_validate(c) for c in contests]
 
 

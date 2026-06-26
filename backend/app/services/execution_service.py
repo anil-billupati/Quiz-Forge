@@ -266,6 +266,9 @@ async def advance(
         )
         await session.refresh(state)
         await publish_event(contest_id, _progress_payload(state))
+        await _notify_leaderboard_engine(
+            session, tenant_id, contest_id, "GROUP" if scope == "GROUP" else "QUESTION", now
+        )
         return state
 
     state.current_question_id = next_question.id
@@ -275,7 +278,20 @@ async def advance(
     await session.commit()
     await session.refresh(state)
     await publish_event(contest_id, _progress_payload(state))
+    await _notify_leaderboard_engine(session, tenant_id, contest_id, scope, now)
     return state
+
+
+async def _notify_leaderboard_engine(
+    session, tenant_id: str, contest_id: str, scope: str, now: datetime
+) -> None:
+    """Best-effort notify the Leaderboard Engine of an advance (Unit 12)."""
+    try:
+        from app.services import leaderboard_service
+
+        await leaderboard_service.handle_advance(session, tenant_id, contest_id, scope, now)
+    except Exception:
+        pass
 
 
 @logged

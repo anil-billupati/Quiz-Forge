@@ -20,6 +20,7 @@ from app.models.base import new_uuid
 from app.models.execution import ContestExecutionState, QuestionWindow
 from app.models.question import Option
 from app.models.registration import Registration
+from app.models.wildcard_activation import WildcardActivation
 from app.observability.method_logging import logged
 from app.redis_client import stream_publish
 from app.services import contest_service, execution_service
@@ -156,16 +157,21 @@ async def submit_answer(
             422, "WRONG_QUESTION", "Submitted question does not match the current question"
         )
 
-    # 5. Validate the selected option belongs to the question (and read correctness).
+    # 5. A second attempt (Second Chance) is only allowed when the participant has
+    # activated the SECOND_CHANCE wildcard on this question (BR-10, FR-24).
+    if attempt_no >= 2:
+        await _require_second_chance(session, tenant_id, contest_id, participant_id, question_id)
+
+    # 6. Validate the selected option belongs to the question (and read correctness).
     option = await _option_for_question(session, tenant_id, question_id, selected_option_id)
 
-    # 6. Idempotency check.
+    # 7. Idempotency check.
     id_hash = _idempotency_hash(contest_id, question_id, participant_id, attempt_no)
     existing = await _existing_submission(session, tenant_id, id_hash)
     if existing is not None:
         return _ack_from_submission(existing)
 
-    # 7. Late-submission check. We record rejected attempts so retries are idempotent.
+    # 8. Late-submission check. We record rejected attempts so retries are idempotent.
     now = _now()
     if now >= _aware(window.submission_close_at):
         submission = AnswerSubmission(
@@ -187,7 +193,7 @@ async def submit_answer(
         await session.refresh(submission)
         return _ack_from_submission(submission)
 
-    # 8. Accept the answer. Capture scoring inputs: correctness and the
+    # 9. Accept the answer. Capture scoring inputs: correctness and the
     # server-measured response time from the authoritative reveal instant (FR-14).
     outcome = "CORRECT" if option.is_correct else "WRONG"
     response_time_ms = None
@@ -229,11 +235,101 @@ async def submit_answer(
     await session.refresh(submission)
     await session.refresh(outbox)
 
-    # 9. Best-effort publish to the scoring command stream after commit.
+    # 10. Best-effort publish to the scoring command stream after commit.
     await _publish_scoring_command(outbox)
     await session.commit()
 
     return _ack_from_submission(submission)
+
+
+@logged
+async def _require_second_chance(
+    session: AsyncSession,
+    tenant_id: str,
+    contest_id: str,
+    participant_id: str,
+    question_id: str,
+) -> None:
+    """Reject attempt_no >= 2 unless a SECOND_CHANCE wildcard was activated here."""
+    activation = (
+        await session.execute(
+            select(WildcardActivation).where(
+                WildcardActivation.tenant_id == tenant_id,
+                WildcardActivation.contest_id == contest_id,
+                WildcardActivation.participant_id == participant_id,
+                WildcardActivation.question_id == question_id,
+                WildcardActivation.type == "SECOND_CHANCE",
+            )
+        )
+    ).scalar_one_or_none()
+    if activation is None:
+        raise AppError(
+            409,
+            "CONFLICT_NO_SECOND_CHANCE",
+            "A Second Chance wildcard is required for a second attempt",
+        )
+
+
+@logged
+async def record_skip_submission(
+    session: AsyncSession,
+    tenant_id: str,
+    contest_id: str,
+    participant_id: str,
+    question_id: str,
+    registration_id: str,
+) -> AnswerSubmission:
+    """Durably record a SKIPPED answer (FR-25) and publish a scoring command.
+
+    Mirrors the accept path of ``submit_answer`` but with no selected option and a
+    SKIPPED outcome; the Scoring Engine awards the full (Fixed) / floor (Speed)
+    value. Idempotent on the natural key: a repeat returns the existing row.
+    """
+    id_hash = _idempotency_hash(contest_id, question_id, participant_id, 1)
+    existing = await _existing_submission(session, tenant_id, id_hash)
+    if existing is not None:
+        return existing
+
+    now = _now()
+    submission = AnswerSubmission(
+        id=new_uuid(),
+        tenant_id=tenant_id,
+        contest_id=contest_id,
+        question_id=question_id,
+        participant_id=participant_id,
+        registration_id=registration_id,
+        selected_option_id=None,
+        attempt_no=1,
+        idempotency_hash=id_hash,
+        status="ACCEPTED",
+        outcome="SKIPPED",
+        response_time_ms=None,
+        server_accepted_at=now,
+    )
+    outbox = OutboxEvent(
+        id=new_uuid(),
+        tenant_id=tenant_id,
+        contest_id=contest_id,
+        topic="answer.submitted",
+        payload={
+            "answer_submission_id": submission.id,
+            "tenant_id": tenant_id,
+            "contest_id": contest_id,
+            "question_id": question_id,
+            "participant_id": participant_id,
+            "attempt_no": "1",
+        },
+        status="PENDING",
+    )
+    session.add(submission)
+    session.add(outbox)
+    await session.commit()
+    await session.refresh(submission)
+    await session.refresh(outbox)
+
+    await _publish_scoring_command(outbox)
+    await session.commit()
+    return submission
 
 
 @logged

@@ -197,6 +197,16 @@ async def score_answer(session: AsyncSession, answer_submission_id: str) -> Scor
                 )
             ).scalar_one()
         await session.refresh(score)
+
+        # Best-effort leaderboard refresh (Unit 12). A failure here must not break
+        # the at-most-once scoring ack.
+        try:
+            from app.services import leaderboard_service
+
+            await leaderboard_service.handle_score_update(session, score)
+        except Exception:
+            pass
+
         return score
     finally:
         reset_current_tenant(token)

@@ -11,11 +11,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies import Principal, db_session, require_roles
 from app.middleware.errors import AppError
 from app.schemas.wildcard import (
+    WildcardActivationAudit,
     WildcardConfigCreate,
     WildcardConfigResponse,
     WildcardConfigUpdate,
 )
 from app.services import wildcard_config_service as svc
+from app.services import wildcard_runtime_service as runtime_svc
 
 router = APIRouter(tags=["Wildcards"])
 _org_admin = require_roles("ORG_ADMIN")
@@ -103,3 +105,19 @@ async def delete_wildcard_config(
 ) -> None:
     tenant_id = _require_tenant(principal)
     await svc.delete_wildcard_config(session, tenant_id, config_block_id, wildcard_type)
+
+
+@router.get(
+    "/contests/{contest_id}/wildcard-audit",
+    response_model=list[WildcardActivationAudit],
+    tags=["Results"],
+)
+async def get_wildcard_audit(
+    contest_id: str,
+    principal: Principal = Depends(_org_admin),
+    session: AsyncSession = Depends(db_session),
+) -> list[WildcardActivationAudit]:
+    """Org Admin: list all wildcard activations for a contest (FR-27)."""
+    tenant_id = _require_tenant(principal)
+    activations = await runtime_svc.list_activations_for_contest(session, tenant_id, contest_id)
+    return [WildcardActivationAudit.model_validate(a) for a in activations]
