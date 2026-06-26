@@ -7,8 +7,6 @@ from __future__ import annotations
 
 import hashlib
 
-import pytest
-
 from app.services.answer_service import _idempotency_hash
 
 

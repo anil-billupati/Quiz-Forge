@@ -25,13 +25,23 @@ def upgrade() -> None:
         sa.Column(
             "tenant_id", sa.String(length=36), sa.ForeignKey("organization.id"), nullable=False
         ),
-        sa.Column("contest_id", sa.String(length=36), sa.ForeignKey("contest.id"), nullable=False),
-        sa.Column("question_id", sa.String(length=36), sa.ForeignKey("question.id"), nullable=False),
         sa.Column(
-            "participant_id", sa.String(length=36), sa.ForeignKey("user_account.id"), nullable=False
+            "contest_id", sa.String(length=36), sa.ForeignKey("contest.id"), nullable=False
         ),
         sa.Column(
-            "registration_id", sa.String(length=36), sa.ForeignKey("registration.id"), nullable=False
+            "question_id", sa.String(length=36), sa.ForeignKey("question.id"), nullable=False
+        ),
+        sa.Column(
+            "participant_id",
+            sa.String(length=36),
+            sa.ForeignKey("user_account.id"),
+            nullable=False,
+        ),
+        sa.Column(
+            "registration_id",
+            sa.String(length=36),
+            sa.ForeignKey("registration.id"),
+            nullable=False,
         ),
         sa.Column(
             "selected_option_id", sa.String(length=36), sa.ForeignKey("option.id"), nullable=False
@@ -66,7 +76,9 @@ def upgrade() -> None:
         sa.Column(
             "tenant_id", sa.String(length=36), sa.ForeignKey("organization.id"), nullable=False
         ),
-        sa.Column("contest_id", sa.String(length=36), sa.ForeignKey("contest.id"), nullable=False),
+        sa.Column(
+            "contest_id", sa.String(length=36), sa.ForeignKey("contest.id"), nullable=False
+        ),
         sa.Column("topic", sa.String(length=32), nullable=False),
         sa.Column("payload", sa.JSON(), nullable=False),
         sa.Column("status", sa.String(length=16), nullable=False, server_default="PENDING"),
