@@ -251,7 +251,6 @@ def test_leaderboard_rest_snapshot_orders_by_score(client):
     resp = c.get(f"/contests/{contest['id']}/leaderboard", headers=_h(oa))
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    print("LEADERBOARD BODY:", body)
     assert len(body) == 2
     assert body[0]["participant_id"] == _user_id_from_token(c, p2)
     assert body[0]["score"] == 10
@@ -353,6 +352,9 @@ def test_leaderboard_update_pushed_on_advance(client):
         ws.receive_json()  # connection.ready
         _submit_answer(c, contest["id"], q1, p1, correct=True)
         c.post(f"/contests/{contest['id']}/control/advance", headers=_h(oa))
+        # advance publishes contest.progress first, then leaderboard.update.
+        progress = ws.receive_json()
+        assert progress["event"] == "contest.progress"
         msg = ws.receive_json()
 
     assert msg["event"] == "leaderboard.update"

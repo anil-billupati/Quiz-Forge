@@ -29,7 +29,7 @@ from app.redis_client import (
     hgetall,
     hset,
     zadd,
-    zrevrange_withscores,
+    zrange_withscores,
 )
 from app.services import configuration_service, contest_service, execution_service
 from app.services.scoring_service import group_rollup
@@ -452,7 +452,7 @@ async def read_leaderboard_from_redis(
     rank_key = _rank_key(namespace)
     metrics_key = _metrics_key(namespace)
 
-    ranked = await zrevrange_withscores(rank_key, 0, -1)
+    ranked = await zrange_withscores(rank_key, 0, -1)
     if not ranked:
         return None
 
