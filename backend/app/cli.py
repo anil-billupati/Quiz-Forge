@@ -21,6 +21,7 @@ from app.db import SessionLocal
 from app.models.base import new_uuid
 from app.models.user import User
 from app.security.passwords import hash_password
+from app.services import answer_service, scoring_service
 
 
 async def _seed_super_admin(email: str, password: str, first: str, last: str) -> str:
@@ -60,7 +61,34 @@ def seed_superadmin() -> None:
     print(asyncio.run(_seed_super_admin(email, password, first, last)))
 
 
-COMMANDS = {"seed-superadmin": seed_superadmin}
+async def _redrive_outbox() -> int:
+    async with SessionLocal() as session:
+        return await answer_service.redrive_pending_outbox(session)
+
+
+def redrive_outbox() -> None:
+    published = asyncio.run(_redrive_outbox())
+    print(f"Re-driven {published} pending outbox event(s).")
+
+
+async def _score_stream() -> tuple[int, int]:
+    """Drain the scoring stream, then re-drive any accepted-but-unscored answers."""
+    async with SessionLocal() as session:
+        processed, _ = await scoring_service.consume_scoring_stream(session)
+        recovered = await scoring_service.score_unscored(session)
+        return processed, recovered
+
+
+def score_stream() -> None:
+    processed, recovered = asyncio.run(_score_stream())
+    print(f"Scored {processed} from stream; re-drove {recovered} unscored answer(s).")
+
+
+COMMANDS = {
+    "seed-superadmin": seed_superadmin,
+    "redrive-outbox": redrive_outbox,
+    "score-stream": score_stream,
+}
 
 
 def main() -> None:

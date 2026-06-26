@@ -7,7 +7,7 @@
 | **Stack** | Python + FastAPI · Next.js + TypeScript · PostgreSQL + Redis |
 | **Cloud** | AWS (deployment-agnostic containers) |
 | **Team** | contest (Lead: Hussain) |
-| **Last updated** | 2026-06-22 |
+| **Last updated** | 2026-06-26 |
 
 ## What this is
 
@@ -37,6 +37,14 @@ Grouped structures.
   use the scoping mixin and never trust client-supplied tenant/timing data.
 - Write tests within the same unit as the code (see `testing-strategy.md`).
 - Implement one delivery unit at a time via `/neutron:feature`.
+- **Method logging:** decorate every service/business function with `@logged`
+  from `app.observability.method_logging` so it emits `method.enter` /
+  `method.exit` (with `duration_ms`) and `method.error` on failure. It supports
+  both `async def` and `def`. Do not log argument values that may contain
+  secrets (sessions, passwords, tokens) — `@logged` omits args by default; pass
+  `log_args=True` only when every argument is known to be safe. HTTP requests are
+  logged automatically by `RequestLoggingMiddleware`, which binds a `request_id`
+  shared by all method logs in that request.
 
 ## Architecture Decision Records
 
@@ -54,15 +62,15 @@ Units from `docs/plan/delivery-plan.md`. Status: ☐ not started · ◐ in progr
 |---|---|---|
 | 1 | Platform foundation | ☑ |
 | 2 | Tenancy & Identity | ☑ |
-| 3 | Contest authoring — contests, groups & lifecycle | ☐ |
-| 4 | Configuration blocks | ☐ |
-| 5 | Questions & options | ☐ |
-| 6 | Registration | ☐ |
-| 7 | Real-time foundation (WebSocket gateway) | ☐ |
-| 8 | Execution Engine | ☐ |
-| 9 | Answer submission & durability | ☐ |
-| 10 | Scoring Engine | ☐ |
-| 11 | Wildcard runtime | ☐ |
+| 3 | Contest authoring — contests, groups & lifecycle | ☑ |
+| 4 | Configuration blocks | ☑ |
+| 5 | Questions & options | ☑ |
+| 6 | Registration | ☑ |
+| 7 | Real-time foundation (WebSocket gateway) | ☑ |
+| 8 | Execution Engine | ☑ |
+| 9 | Answer submission & durability | ☑ |
+| 10 | Scoring Engine | ☑ |
+| 11 | Wildcard runtime | ☑ |
 | 12 | Leaderboard Engine | ☐ |
 | 13 | Elimination Engine | ☐ |
 | 14 | Notifications | ☐ |
@@ -71,4 +79,8 @@ Units from `docs/plan/delivery-plan.md`. Status: ☐ not started · ◐ in progr
 | 17 | Resilience, recovery & performance hardening | ☐ |
 | 18 | Frontend (18a admin/authoring, 18b live/participant) | ☐ |
 
-**Next:** `/neutron:feature "Unit 3: Contest authoring — contests, groups & lifecycle"`
+**Next:** `/neutron:feature "Unit 12: Leaderboard Engine"`
+
+> Note: Unit 4 keeps configuration **Draft-only** (locks at PUBLISHED), an
+> accepted deviation from spec BR-5 (which specifies a Registration-Open lock).
+> See `docs/session-log.md` (2026-06-25).

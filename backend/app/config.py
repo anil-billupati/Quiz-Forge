@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     # Multi-tenancy
     enforce_query_scoping: bool = True  # rejects unscoped tenant queries (technical-spec §7.1)
 
+    # Real-time gateway (Unit 7)
+    live_ticket_ttl_seconds: int = 30  # single-use WS connection ticket lifetime
+
 
 @lru_cache
 def get_settings() -> Settings:

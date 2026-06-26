@@ -23,7 +23,7 @@ router = APIRouter(prefix="/auth", tags=["Auth"])
 
 @router.post("/login", response_model=TokenPair)
 async def login(body: LoginRequest, session: AsyncSession = Depends(db_session)) -> TokenPair:
-    tokens = await auth_service.login(session, body.email, body.password, body.tenant_slug)
+    tokens = await auth_service.login(session, body.email, body.password)
     return TokenPair(**tokens)
 
 

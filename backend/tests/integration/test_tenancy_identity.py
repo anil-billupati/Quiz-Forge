@@ -230,3 +230,138 @@ async def test_cross_tenant_user_isolation(api):
 
     listing = await api.get("/users", headers=_auth(oa_acme))
     assert all(u["email"] != "g@globex.com" for u in listing.json())
+
+
+# ── F5: bulk participant import ──────────────────────────────────────────────
+
+
+def _csv(rows: list[tuple[str, str, str]]) -> str:
+    lines = ["email,first_name,last_name"]
+    for email, first, last in rows:
+        lines.append(f"{email},{first},{last}")
+    return "\n".join(lines)
+
+
+@pytest.mark.asyncio
+async def test_bulk_import_creates_participants_with_otps(api):
+    su = await _login(api, SUPER_EMAIL, SUPER_PASSWORD)
+    await _create_org(api, su, "acme", "admin@acme.com")
+    oa = await _login(api, "admin@acme.com", "org-admin-pw-1", tenant_slug="acme")
+
+    csv_data = _csv(
+        [
+            ("a@acme.com", "A", "One"),
+            ("b@acme.com", "B", "Two"),
+        ]
+    )
+    resp = await api.post(
+        "/users/bulk",
+        headers=_auth(oa),
+        files={"file": ("participants.csv", csv_data, "text/csv")},
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["created_count"] == 2
+    assert data["skipped_count"] == 0
+    otps = {r["email"]: r["one_time_password"] for r in data["results"]}
+    assert all(otps.values())  # every CREATED row carries an OTP
+
+    # A created participant can log in with the returned one-time password.
+    pl = await _login(api, "a@acme.com", otps["a@acme.com"], tenant_slug="acme")
+    assert pl["role"] == "PARTICIPANT"
+
+
+@pytest.mark.asyncio
+async def test_bulk_import_skips_duplicates_and_invalid(api):
+    su = await _login(api, SUPER_EMAIL, SUPER_PASSWORD)
+    await _create_org(api, su, "acme", "admin@acme.com")
+    oa = await _login(api, "admin@acme.com", "org-admin-pw-1", tenant_slug="acme")
+
+    # Pre-existing participant collides with one import row.
+    await api.post(
+        "/users",
+        headers=_auth(oa),
+        json={
+            "email": "dup@acme.com",
+            "first_name": "D",
+            "last_name": "Up",
+            "role": "PARTICIPANT",
+            "password": "existing-pw-1",
+        },
+    )
+
+    csv_data = _csv(
+        [
+            ("dup@acme.com", "D", "Up"),  # exists
+            ("new@acme.com", "N", "Ew"),  # created
+            ("new@acme.com", "N", "Ew"),  # batch dup
+            ("not-an-email", "X", "Y"),  # invalid
+        ]
+    )
+    resp = await api.post(
+        "/users/bulk",
+        headers=_auth(oa),
+        files={"file": ("participants.csv", csv_data, "text/csv")},
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["created_count"] == 1
+    assert data["skipped_count"] == 3
+    reasons = {(r["email"], r["status"], r["reason"]) for r in data["results"]}
+    assert ("dup@acme.com", "SKIPPED", "duplicate_email") in reasons
+    assert ("new@acme.com", "SKIPPED", "duplicate_email") in reasons
+    assert ("not-an-email", "SKIPPED", "invalid_email") in reasons
+
+
+@pytest.mark.asyncio
+async def test_bulk_import_rejects_participant_caller(api):
+    su = await _login(api, SUPER_EMAIL, SUPER_PASSWORD)
+    await _create_org(api, su, "acme", "admin@acme.com")
+    oa = await _login(api, "admin@acme.com", "org-admin-pw-1", tenant_slug="acme")
+    await api.post(
+        "/users",
+        headers=_auth(oa),
+        json={
+            "email": "player@acme.com",
+            "first_name": "Pat",
+            "last_name": "Player",
+            "role": "PARTICIPANT",
+            "password": "player-pw-123",
+        },
+    )
+    pl = await _login(api, "player@acme.com", "player-pw-123", tenant_slug="acme")
+    csv_data = _csv([("z@acme.com", "Z", "Z")])
+    resp = await api.post(
+        "/users/bulk",
+        headers=_auth(pl),
+        files={"file": ("participants.csv", csv_data, "text/csv")},
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_bulk_import_rejects_non_csv(api):
+    su = await _login(api, SUPER_EMAIL, SUPER_PASSWORD)
+    await _create_org(api, su, "acme", "admin@acme.com")
+    oa = await _login(api, "admin@acme.com", "org-admin-pw-1", tenant_slug="acme")
+
+    resp = await api.post(
+        "/users/bulk",
+        headers=_auth(oa),
+        files={"file": ("participants.json", "[]", "application/json")},
+    )
+    assert resp.status_code == 415
+
+
+@pytest.mark.asyncio
+async def test_bulk_import_rejects_missing_header(api):
+    su = await _login(api, SUPER_EMAIL, SUPER_PASSWORD)
+    await _create_org(api, su, "acme", "admin@acme.com")
+    oa = await _login(api, "admin@acme.com", "org-admin-pw-1", tenant_slug="acme")
+
+    resp = await api.post(
+        "/users/bulk",
+        headers=_auth(oa),
+        files={"file": ("bad.csv", "foo,bar\n1,2", "text/csv")},
+    )
+    assert resp.status_code == 422

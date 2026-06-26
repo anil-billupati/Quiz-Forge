@@ -2,18 +2,22 @@
 Super Admin creates other Super Admins."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, File, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import Principal, db_session, require_roles
 from app.middleware.errors import AppError
 from app.schemas.user import (
+    BulkCreateParticipantsRequest,
+    BulkCreateParticipantsResult,
+    BulkParticipantRow,
     CreateSuperAdminRequest,
     CreateUserRequest,
     UpdateUserRequest,
     UserOut,
 )
 from app.services import user_service as svc
+from app.utils.csv_import import parse_participant_csv
 
 router = APIRouter(tags=["Users"])
 _org_admin = require_roles("ORG_ADMIN")
@@ -34,6 +38,32 @@ async def create_user(
 ) -> UserOut:
     tenant_id = _require_tenant(principal)
     return UserOut.model_validate(await svc.create_user(session, tenant_id, body))
+
+
+@router.post("/users/bulk", response_model=BulkCreateParticipantsResult)
+async def bulk_create_participants(
+    file: UploadFile = File(...),
+    principal: Principal = Depends(_org_admin),
+    session: AsyncSession = Depends(db_session),
+) -> BulkCreateParticipantsResult:
+    """Bulk-import PARTICIPANT accounts from a CSV file (F5, FR-3a).
+
+    The CSV must contain a header row with columns: email, first_name, last_name.
+    Malformed rows and duplicates (already in the tenant or repeated within the
+    file) are SKIPPED with a reason; valid new rows are CREATED with a generated
+    one-time password returned for out-of-band distribution.
+    """
+    tenant_id = _require_tenant(principal)
+    if file.content_type not in ("text/csv", "application/vnd.ms-excel", None):
+        raise AppError(415, "UNSUPPORTED_MEDIA_TYPE", "Only CSV files are supported")
+    try:
+        text = (await file.read()).decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise AppError(422, "INVALID_CSV", "CSV must be UTF-8 encoded") from exc
+
+    rows = parse_participant_csv(text)
+    body = BulkCreateParticipantsRequest(participants=[BulkParticipantRow(**r) for r in rows])
+    return await svc.bulk_create_participants(session, tenant_id, body)
 
 
 @router.get("/users", response_model=list[UserOut])

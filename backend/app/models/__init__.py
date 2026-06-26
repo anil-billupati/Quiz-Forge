@@ -9,7 +9,18 @@ from app.models.base import Base
 from app.models.organization import Organization, TenantSettings
 from app.models.user import RefreshToken, User
 from app.models.tenant_usage import TenantUsageRecord
+from app.models.contest import Contest, ContestLifecycleEvent
+from app.models.group import Group
 from app.models.foundation_probe import FoundationProbe
+from app.models.configuration_block import ConfigurationBlock
+from app.models.wildcard_config import WildcardConfig
+from app.models.elimination import Checkpoint, EliminationRule
+from app.models.question import Option, Question
+from app.models.registration import Registration
+from app.models.execution import ContestExecutionState, QuestionWindow
+from app.models.answer import AnswerSubmission, OutboxEvent
+from app.models.score import Score
+from app.models.wildcard_activation import WildcardActivation
 
 __all__ = [
     "Base",
@@ -18,5 +29,21 @@ __all__ = [
     "User",
     "RefreshToken",
     "TenantUsageRecord",
+    "Contest",
+    "ContestLifecycleEvent",
+    "Group",
     "FoundationProbe",
+    "ConfigurationBlock",
+    "WildcardConfig",
+    "EliminationRule",
+    "Checkpoint",
+    "Question",
+    "Option",
+    "Registration",
+    "ContestExecutionState",
+    "QuestionWindow",
+    "AnswerSubmission",
+    "OutboxEvent",
+    "Score",
+    "WildcardActivation",
 ]

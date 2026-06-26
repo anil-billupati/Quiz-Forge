@@ -182,6 +182,36 @@ paths:
                         items: { $ref: '#/components/schemas/User' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /users/bulk:
+    post:
+      tags: [Users]
+      summary: Bulk-import Participants (Org Admin). Creates PARTICIPANT accounts from a CSV/JSON list.
+      description: >
+        Creates PARTICIPANT accounts in the caller's tenant from an array of
+        { email, first_name, last_name }. Generates a one-time password per new
+        user (v1 has no email delivery) returned to the Org Admin for
+        out-of-band distribution. Partial success: duplicates or invalid rows
+        are skipped and reported per row; valid rows still succeed. Role is
+        always PARTICIPANT (other roles use POST /users).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BulkCreateParticipantsRequest' }
+          text/csv:
+            schema:
+              type: string
+              format: binary
+              description: CSV with header `email,first_name,last_name`
+      responses:
+        '200':
+          description: Import processed (see per-row results)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BulkCreateParticipantsResult' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
   /users/{userId}:
     parameters:
       - { $ref: '#/components/parameters/UserId' }
@@ -1212,6 +1242,38 @@ components:
             Set by the creating Org Admin (v1 has no email delivery). The user
             may change it later via POST /auth/change-password.
 
+    BulkCreateParticipantsRequest:
+      type: object
+      required: [participants]
+      properties:
+        participants:
+          type: array
+          minItems: 1
+          maxItems: 5000
+          items:
+            type: object
+            required: [email, first_name, last_name]
+            properties:
+              email: { type: string, format: email }
+              first_name: { type: string }
+              last_name: { type: string }
+
+    BulkCreateParticipantsResult:
+      type: object
+      properties:
+        created_count: { type: integer }
+        skipped_count: { type: integer }
+        results:
+          type: array
+          items:
+            type: object
+            properties:
+              email: { type: string, format: email }
+              status: { type: string, enum: [CREATED, SKIPPED] }
+              reason: { type: string, nullable: true, description: Present when SKIPPED (e.g. duplicate_email, invalid_email) }
+              user_id: { type: string, format: uuid, nullable: true }
+              one_time_password: { type: string, nullable: true, description: Returned only for CREATED rows; for out-of-band distribution }
+
     CreateSuperAdminRequest:
       type: object
       required: [email, first_name, last_name, password]
@@ -1261,7 +1323,6 @@ components:
         max_concurrent_live_contests: { type: integer, default: 5 }
         max_participants_per_contest: { type: integer, default: 10000 }
         max_questions_per_contest: { type: integer, default: 200 }
-        default_negative_marking: { type: boolean, default: false }
         updated_at: { type: string, format: date-time }
 
     TenantSettingsPatch:
@@ -1271,7 +1332,6 @@ components:
         max_concurrent_live_contests: { type: integer }
         max_participants_per_contest: { type: integer }
         max_questions_per_contest: { type: integer }
-        default_negative_marking: { type: boolean }
 
     TenantUsageRecord:
       type: object
@@ -1391,7 +1451,6 @@ components:
           type: string
           enum: [PER_ANSWER, PER_QUESTION, PER_GROUP]
         correct_points: { type: integer, default: 10 }
-        wrong_points: { type: integer, default: 0 }
         second_chance_rate: { type: number, default: 0.5 }
         time_bands:
           type: array
@@ -1433,12 +1492,17 @@ components:
     WildcardConfig:
       type: object
       required: [type]
+      description: >
+        Enables a wildcard type in this block. Each enabled wildcard is usable
+        once per participant for the whole contest (no usage_limit, cooldown, or
+        carry_over). TOP_50_PERCENT is evaluated against the last committed
+        leaderboard at the start of the current question.
       properties:
         type: { type: string, enum: [FIFTY_FIFTY, SECOND_CHANCE, SKIP] }
-        usage_limit: { type: integer }
-        eligibility: { type: string, example: "ALL | TOP_50_PERCENT" }
-        cooldown_questions: { type: integer }
-        carry_over: { type: boolean, description: Grouped only }
+        eligibility:
+          type: string
+          enum: [ALL, TOP_50_PERCENT]
+          default: ALL
 
     EliminationRule:
       type: object
