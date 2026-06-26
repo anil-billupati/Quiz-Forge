@@ -183,7 +183,7 @@ def test_unsupported_action(client):
         f"/contests/{contest['id']}/live", subprotocols=[f"ticket.{ticket}"]
     ) as ws:
         ws.receive_json()
-        ws.send_json({"action": "answer.submit"})
+        ws.send_json({"action": "wildcard.activate"})
         msg = ws.receive_json()
         assert msg["event"] == "error"
         assert msg["reason"] == "unsupported_action"

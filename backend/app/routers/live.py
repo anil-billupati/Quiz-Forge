@@ -10,14 +10,19 @@ from __future__ import annotations
 
 import structlog
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
+from fastapi.exceptions import RequestValidationError
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.dependencies import Principal, db_session, require_roles
 from app.middleware.errors import AppError
+from app.middleware.tenant_context import reset_current_tenant, set_current_tenant
 from app.realtime.gateway import add_presence, manager, remove_presence
 from app.realtime.tickets import ticket_store
+from app.schemas.answer import AnswerSubmit
 from app.schemas.live import LiveStateResponse, LiveTicketResponse
+from app.services import answer_service
 from app.services import live_service as svc
 
 router = APIRouter(tags=["Live"])
@@ -67,7 +72,11 @@ def _extract_ticket(subprotocols: list[str]) -> str | None:
 
 
 @router.websocket("/contests/{contest_id}/live")
-async def live_channel(websocket: WebSocket, contest_id: str) -> None:
+async def live_channel(
+    websocket: WebSocket,
+    contest_id: str,
+    session: AsyncSession = Depends(db_session),
+) -> None:
     subprotocols = websocket.scope.get("subprotocols", [])
     ticket_value = _extract_ticket(subprotocols)
     payload = ticket_store.consume(ticket_value) if ticket_value else None
@@ -83,24 +92,68 @@ async def live_channel(websocket: WebSocket, contest_id: str) -> None:
     await add_presence(contest_id, payload.user_id)
     await websocket.send_json({"event": "connection.ready", "contest_id": contest_id})
 
+    tenant_token = set_current_tenant(payload.tenant_id)
     try:
         while True:
             message = await websocket.receive_json()
-            await _handle_action(websocket, message)
+            await _handle_action(websocket, session, payload, message)
     except WebSocketDisconnect:
         pass
     finally:
+        reset_current_tenant(tenant_token)
         manager.disconnect(contest_id, websocket)
         await remove_presence(contest_id, payload.user_id)
 
 
-async def _handle_action(websocket: WebSocket, message: dict) -> None:
-    """Handle client→server actions. Unit 7 supports heartbeat; richer actions
-    (answer.submit, wildcard.activate, moderator.*) arrive in later units."""
+async def _handle_action(
+    websocket: WebSocket,
+    session: AsyncSession,
+    ticket_payload,
+    message: dict,
+) -> None:
+    """Handle client→server actions. Unit 7 supports heartbeat; Unit 9 adds
+    answer.submit; richer actions (wildcard.activate, moderator.*) arrive in
+    later units.
+    """
     action = message.get("action")
     if action == "ping":
         await websocket.send_json({"event": "pong"})
-    else:
-        await websocket.send_json(
-            {"event": "error", "reason": "unsupported_action", "action": action}
-        )
+        return
+
+    if action == "answer.submit":
+        try:
+            body = AnswerSubmit.model_validate(message)
+            ack = await answer_service.submit_answer(
+                session,
+                ticket_payload.tenant_id,
+                ticket_payload.contest_id,
+                ticket_payload.user_id,
+                body.question_id,
+                body.selected_option_id,
+                body.attempt_no,
+            )
+        except (ValidationError, RequestValidationError) as exc:
+            ack = {
+                "event": "answer.ack",
+                "submission_id": None,
+                "accepted": False,
+                "attempt_no": message.get("attempt_no", 1),
+                "reason": "validation_error",
+                "details": str(exc),
+            }
+        except AppError as exc:
+            # Validation failures surface as a rejected answer.ack so the client
+            # receives a deterministic response without the connection dropping.
+            ack = {
+                "event": "answer.ack",
+                "submission_id": None,
+                "accepted": False,
+                "attempt_no": message.get("attempt_no", 1),
+                "reason": exc.code.lower(),
+            }
+        await websocket.send_json(ack)
+        return
+
+    await websocket.send_json(
+        {"event": "error", "reason": "unsupported_action", "action": action}
+    )
