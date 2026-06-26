@@ -18,6 +18,7 @@ from app.models.elimination import Checkpoint, EliminationRule
 from app.models.question import Option, Question
 from app.models.registration import Registration
 from app.models.execution import ContestExecutionState, QuestionWindow
+from app.models.answer import AnswerSubmission, OutboxEvent
 
 __all__ = [
     "Base",
@@ -39,4 +40,6 @@ __all__ = [
     "Registration",
     "ContestExecutionState",
     "QuestionWindow",
+    "AnswerSubmission",
+    "OutboxEvent",
 ]
