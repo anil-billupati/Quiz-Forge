@@ -24,20 +24,23 @@ export default async function OrganizationsPage(props: {
   const status = searchParams.status ?? "all";
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+    <div className="mx-auto max-w-6xl space-y-5">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
+          <p className="text-sm font-medium text-slate-500">Platform</p>
           <h2 className="text-2xl font-bold text-slate-900">Organizations</h2>
           <OrganizationsCount status={status} />
         </div>
-        <Button asChild className="gap-1.5 bg-[#f05a22] hover:bg-[#d94d1a]">
+        <Button asChild className="gap-1.5 bg-[#f05a22] hover:bg-[#d94d1a] shrink-0">
           <Link href="/super-admin/organizations/create">
             <Plus className="size-4" />
             New Organization
           </Link>
         </Button>
       </div>
-      <OrganizationsFilter defaultQuery={q} defaultStatus={status} />
+      <Suspense fallback={null}>
+        <OrganizationsFilterWithCounts defaultQuery={q} defaultStatus={status} />
+      </Suspense>
       <Suspense key={`${q}-${status}`} fallback={<OrganizationsTableSkeleton />}>
         <OrganizationsTableAsync q={q} status={status} />
       </Suspense>
@@ -51,8 +54,49 @@ async function OrganizationsCount({
   status: "all" | "active" | "suspended";
 }) {
   const orgs = await fetchOrganizations(status);
+
+  if (status === "all") {
+    const active = orgs.filter((o) => o.status === "active").length;
+    const suspended = orgs.filter((o) => o.status === "suspended").length;
+    return (
+      <p className="text-sm text-slate-500">
+        {orgs.length} total
+        <span className="mx-2 text-slate-300">·</span>
+        <span className="text-emerald-600">{active} active</span>
+        <span className="mx-2 text-slate-300">·</span>
+        <span className="text-red-600">{suspended} suspended</span>
+      </p>
+    );
+  }
+
+  const label = status === "active" ? "active" : "suspended";
   return (
-    <p className="text-sm text-slate-500">{orgs.length} total organizations</p>
+    <p className="text-sm text-slate-500">
+      {orgs.length} {label} organization{orgs.length === 1 ? "" : "s"}
+    </p>
+  );
+}
+
+async function OrganizationsFilterWithCounts({
+  defaultQuery,
+  defaultStatus,
+}: {
+  defaultQuery: string;
+  defaultStatus: "all" | "active" | "suspended";
+}) {
+  const orgs = await fetchOrganizations("all");
+  const counts = {
+    all: orgs.length,
+    active: orgs.filter((o) => o.status === "active").length,
+    suspended: orgs.filter((o) => o.status === "suspended").length,
+  };
+
+  return (
+    <OrganizationsFilter
+      defaultQuery={defaultQuery}
+      defaultStatus={defaultStatus}
+      counts={counts}
+    />
   );
 }
 
