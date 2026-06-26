@@ -14,12 +14,13 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, JSON, String, UniqueConstraint, func
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TenantScoped, new_uuid
 
 SUBMISSION_STATUSES = ("ACCEPTED", "REJECTED")
+OUTCOMES = ("CORRECT", "WRONG", "TIMEOUT", "SKIPPED")
 OUTBOX_STATUSES = ("PENDING", "PUBLISHED", "FAILED")
 
 
@@ -60,7 +61,15 @@ class AnswerSubmission(Base, TenantScoped):
     idempotency_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False)  # ACCEPTED | REJECTED
     rejection_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    server_accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Scoring inputs (Unit 10): correctness and server-measured response time.
+    outcome: Mapped[str | None] = mapped_column(
+        String(16), nullable=True
+    )  # CORRECT | WRONG | TIMEOUT | SKIPPED
+    response_time_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    scored: Mapped[bool] = mapped_column(nullable=False, default=False)
+    server_accepted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

@@ -22,7 +22,8 @@ from app.realtime.gateway import add_presence, manager, remove_presence
 from app.realtime.tickets import ticket_store
 from app.schemas.answer import AnswerSubmit
 from app.schemas.live import LiveStateResponse, LiveTicketResponse
-from app.services import answer_service, live_service as svc
+from app.services import answer_service
+from app.services import live_service as svc
 
 router = APIRouter(tags=["Live"])
 _member = require_roles("ORG_ADMIN", "MODERATOR", "PARTICIPANT")

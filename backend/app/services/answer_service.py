@@ -8,7 +8,7 @@ transaction; a scoring command is published to Redis Streams after commit.
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -18,7 +18,7 @@ from app.middleware.errors import AppError
 from app.models.answer import AnswerSubmission, OutboxEvent
 from app.models.base import new_uuid
 from app.models.execution import ContestExecutionState, QuestionWindow
-from app.models.question import Option, Question
+from app.models.question import Option
 from app.models.registration import Registration
 from app.observability.method_logging import logged
 from app.redis_client import stream_publish
@@ -37,11 +37,11 @@ def _idempotency_hash(
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _aware(dt: datetime) -> datetime:
-    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
 
 
 @logged
@@ -70,9 +70,10 @@ async def _get_open_window(
 
 
 @logged
-async def _validate_option_belongs_to_question(
+async def _option_for_question(
     session: AsyncSession, tenant_id: str, question_id: str, option_id: str
-) -> None:
+) -> Option:
+    """Return the selected option, validating it belongs to the question."""
     option = (
         await session.execute(
             select(Option).where(
@@ -84,6 +85,7 @@ async def _validate_option_belongs_to_question(
     ).scalar_one_or_none()
     if option is None:
         raise AppError(422, "INVALID_OPTION", "Selected option does not belong to the question")
+    return option
 
 
 @logged
@@ -141,19 +143,21 @@ async def submit_answer(
         )
     ).scalar_one_or_none()
     if registration is None or registration.status not in ACTIVE_REGISTRATION_STATUSES:
-        raise AppError(403, "NOT_REGISTERED", "An active registration is required to submit answers")
+        raise AppError(
+            403, "NOT_REGISTERED", "An active registration is required to submit answers"
+        )
 
     # 3. Execution state and open window.
     state, window = await _get_open_window(session, tenant_id, contest_id)
 
     # 4. Submission must match the currently revealed question.
     if question_id != state.current_question_id:
-        raise AppError(422, "WRONG_QUESTION", "Submitted question does not match the current question")
+        raise AppError(
+            422, "WRONG_QUESTION", "Submitted question does not match the current question"
+        )
 
-    # 5. Validate the selected option belongs to the question.
-    await _validate_option_belongs_to_question(
-        session, tenant_id, question_id, selected_option_id
-    )
+    # 5. Validate the selected option belongs to the question (and read correctness).
+    option = await _option_for_question(session, tenant_id, question_id, selected_option_id)
 
     # 6. Idempotency check.
     id_hash = _idempotency_hash(contest_id, question_id, participant_id, attempt_no)
@@ -183,7 +187,12 @@ async def submit_answer(
         await session.refresh(submission)
         return _ack_from_submission(submission)
 
-    # 8. Accept the answer.
+    # 8. Accept the answer. Capture scoring inputs: correctness and the
+    # server-measured response time from the authoritative reveal instant (FR-14).
+    outcome = "CORRECT" if option.is_correct else "WRONG"
+    response_time_ms = None
+    if window.revealed_at is not None:
+        response_time_ms = max(0, int((now - _aware(window.revealed_at)).total_seconds() * 1000))
     submission = AnswerSubmission(
         id=new_uuid(),
         tenant_id=tenant_id,
@@ -195,6 +204,8 @@ async def submit_answer(
         attempt_no=attempt_no,
         idempotency_hash=id_hash,
         status="ACCEPTED",
+        outcome=outcome,
+        response_time_ms=response_time_ms,
         server_accepted_at=now,
     )
     outbox = OutboxEvent(
