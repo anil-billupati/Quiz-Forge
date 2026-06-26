@@ -2,7 +2,6 @@
 
 import { AlertTriangle, Users } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { ContestFormState } from "../types";
 
@@ -158,14 +157,6 @@ export default function ReviewStep({ data, contestId }: ReviewStepProps) {
                 <span className="font-medium">
                   {moderator.first_name} {moderator.last_name}
                 </span>
-                {moderator.isNewlyCreated && (
-                  <Badge
-                    variant="outline"
-                    className="border-emerald-200 text-emerald-700"
-                  >
-                    Invite sent
-                  </Badge>
-                )}
               </div>
             ))
           ) : (

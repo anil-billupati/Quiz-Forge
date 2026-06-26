@@ -1,6 +1,17 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Loader2, AlertCircle } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { useLiveContest } from "@/hooks/useLiveContest";
+import { getContestById, type ContestOut } from "@/lib/api/contests";
+import {
+  startContest,
+  revealQuestion,
+  advanceContest,
+  type ExecutionStateResponse,
+} from "@/lib/api/control";
 import ModeratorHeader from "@/components/moderator/ModeratorHeader";
 import LiveStats from "@/components/moderator/LiveStats";
 import TimerPanel from "@/components/moderator/TimerPanel";
@@ -9,213 +20,285 @@ import ActionToolbar from "@/components/moderator/ActionToolbar";
 import LiveLeaderboard from "@/components/moderator/LiveLeaderboard";
 import ActivityFeed from "@/components/moderator/ActivityFeed";
 import ResponseDistribution from "@/components/moderator/ResponseDistribution";
+import ModeratorContestPicker from "../components/ModeratorContestPicker";
 
-const mockLeaderboard = [
-  {
-    id: "1",
-    rank: 1,
-    name: "Sarah Chen",
-    initials: "SC",
-    avatarColor: "bg-sky-400",
-    score: 2480,
-    accuracy: 96,
-    time: "4:12",
-    change: { direction: "up" as const, value: 1 },
-  },
-  {
-    id: "2",
-    rank: 2,
-    name: "Marcus Reid",
-    initials: "MR",
-    avatarColor: "bg-cyan-400",
-    score: 2350,
-    accuracy: 94,
-    time: "4:38",
-    change: { direction: "down" as const, value: 1 },
-  },
-  {
-    id: "3",
-    rank: 3,
-    name: "Aisha Patel",
-    initials: "AP",
-    avatarColor: "bg-sky-500",
-    score: 2190,
-    accuracy: 91,
-    time: "5:02",
-    change: { direction: "same" as const, value: 0 },
-  },
-  {
-    id: "4",
-    rank: 4,
-    name: "Tom Walters",
-    initials: "TW",
-    avatarColor: "bg-[#f05a22]",
-    score: 2050,
-    accuracy: 88,
-    time: "5:44",
-    change: { direction: "up" as const, value: 2 },
-  },
-  {
-    id: "5",
-    rank: 5,
-    name: "Elena Sousa",
-    initials: "ES",
-    avatarColor: "bg-amber-500",
-    score: 1980,
-    accuracy: 85,
-    time: "6:11",
-    change: { direction: "down" as const, value: 1 },
-  },
-  {
-    id: "6",
-    rank: 6,
-    name: "James Liu",
-    initials: "JL",
-    avatarColor: "bg-emerald-500",
-    score: 1870,
-    accuracy: 82,
-    time: "6:28",
-    change: { direction: "down" as const, value: 1 },
-  },
-  {
-    id: "7",
-    rank: 7,
-    name: "Priya Nair",
-    initials: "PN",
-    avatarColor: "bg-emerald-400",
-    score: 1720,
-    accuracy: 79,
-    time: "7:02",
-    change: { direction: "up" as const, value: 2 },
-  },
-  {
-    id: "8",
-    rank: 8,
-    name: "Carlos Mendez",
-    initials: "CM",
-    avatarColor: "bg-violet-500",
-    score: 1640,
-    accuracy: 77,
-    time: "7:31",
-    change: { direction: "down" as const, value: 1 },
-  },
-];
-
-const mockActivity = [
-  { id: "1", type: "eliminated" as const, message: "Participant eliminated David Park", timestamp: "14:32:01" },
-  { id: "2", type: "wildcard" as const, message: "Wildcard used: 50/50 Sarah Chen", timestamp: "14:31:47" },
-  { id: "3", type: "correct" as const, message: "Correct answer Marcus Reid", timestamp: "14:31:12" },
-  { id: "4", type: "wildcard" as const, message: "Wildcard used: Skip Elena Sousa", timestamp: "14:30:58" },
-  { id: "5", type: "joined" as const, message: "Participant joined Kai Thompson", timestamp: "14:30:33" },
-  { id: "6", type: "question" as const, message: "Question 12 started", timestamp: "14:30:01" },
-];
-
-const mockDistribution = [
-  { label: "A  Stack", percentage: 62, count: 5226 },
-  { label: "B  Queue", percentage: 18, count: 1517 },
-  { label: "C  Heap", percentage: 12, count: 1011 },
-  { label: "D  Tree", percentage: 8, count: 674 },
-];
+const labelForOrdinal = (n: number): string => String.fromCharCode(65 + n);
 
 export default function ModeratorLivePage() {
-  const [elapsedMs, setElapsedMs] = useState((1 * 3600 + 24 * 60 + 38) * 1000);
-  const [remainingMs, setRemainingMs] = useState(9 * 1000);
-  const [revealed, setRevealed] = useState(false);
-  const [paused, setPaused] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const searchParams = useSearchParams();
+  const contestId = searchParams.get("contestId") ?? "";
+  const useMock = searchParams.get("mock") === "1";
+
+  const [contest, setContest] = useState<ContestOut | null>(null);
+  const [contestError, setContestError] = useState<string | null>(null);
+  const [controlLoading, setControlLoading] = useState(false);
+  const [localPaused, setLocalPaused] = useState(false);
+  const [sessionStart, setSessionStart] = useState<number | null>(null);
+  const [questionTotalMs, setQuestionTotalMs] = useState(0);
+
+  const {
+    status,
+    error,
+    phase,
+    currentQuestion,
+    submissionCloseAt,
+    leaderboard,
+    lastEvaluation,
+    activity,
+  } = useLiveContest({
+    contestId,
+    role: "MODERATOR",
+    enabled: !!contestId,
+    mock: useMock,
+  });
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      setElapsedMs((prev) => prev + 1000);
-      if (!paused && remainingMs > 0) {
-        setRemainingMs((prev) => Math.max(0, prev - 1000));
+    if (!contestId) return;
+    let cancelled = false;
+    getContestById(contestId)
+      .then((c) => {
+        if (!cancelled) setContest(c);
+      })
+      .catch((err) => {
+        if (!cancelled) setContestError(err instanceof Error ? err.message : "Failed to load contest.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [contestId]);
+
+  useEffect(() => {
+    if (submissionCloseAt && phase === "SUBMISSION") {
+      const closeMs = new Date(submissionCloseAt).getTime();
+      const nowMs = Date.now();
+      setQuestionTotalMs(Math.max(1, closeMs - nowMs));
+    }
+  }, [submissionCloseAt, phase, currentQuestion?.id]);
+
+  const remainingMs = useMemo(() => {
+    if (!submissionCloseAt || phase !== "SUBMISSION") return 0;
+    return Math.max(0, new Date(submissionCloseAt).getTime() - Date.now());
+  }, [submissionCloseAt, phase]);
+
+  const sessionElapsedMs = useMemo(() => {
+    if (!sessionStart) return 0;
+    return Date.now() - sessionStart;
+  }, [sessionStart]);
+
+  const handleStart = async () => {
+    if (!contestId) return;
+    setControlLoading(true);
+    setContestError(null);
+    try {
+      const state = await startContest(contestId);
+      if (state.started_at && !sessionStart) {
+        setSessionStart(new Date(state.started_at).getTime());
       }
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [paused, remainingMs]);
+    } catch (err) {
+      setContestError(err instanceof Error ? err.message : "Failed to start contest.");
+    } finally {
+      setControlLoading(false);
+    }
+  };
 
-  const handleReveal = useCallback(() => {
-    setIsLoading(true);
-    setTimeout(() => {
-      setRevealed(true);
-      setIsLoading(false);
-    }, 400);
-  }, []);
+  const handleReveal = async () => {
+    if (!contestId) return;
+    setControlLoading(true);
+    setContestError(null);
+    try {
+      await revealQuestion(contestId);
+    } catch (err) {
+      setContestError(err instanceof Error ? err.message : "Failed to reveal question.");
+    } finally {
+      setControlLoading(false);
+    }
+  };
 
-  const handleTogglePause = useCallback(() => {
-    setPaused((prev) => !prev);
-  }, []);
+  const handleAdvance = async () => {
+    if (!contestId) return;
+    setControlLoading(true);
+    setContestError(null);
+    try {
+      await advanceContest(contestId, "QUESTION");
+    } catch (err) {
+      setContestError(err instanceof Error ? err.message : "Failed to advance.");
+    } finally {
+      setControlLoading(false);
+    }
+  };
 
-  const handleNextQuestion = useCallback(() => {
-    setIsLoading(true);
-    setTimeout(() => {
-      setRevealed(false);
-      setRemainingMs(20 * 1000);
-      setIsLoading(false);
-    }, 400);
-  }, []);
+  const handleEndContest = async () => {
+    if (!contestId) return;
+    setControlLoading(true);
+    setContestError(null);
+    try {
+      let state: ExecutionStateResponse | null = null;
+      let guard = 0;
+      do {
+        state = await advanceContest(contestId, guard === 0 ? "GROUP" : "QUESTION");
+        guard += 1;
+      } while (state.phase !== "ENDED" && guard < 100);
+    } catch (err) {
+      setContestError(err instanceof Error ? err.message : "Failed to end contest.");
+    } finally {
+      setControlLoading(false);
+    }
+  };
 
-  const handleTriggerElimination = useCallback(() => {
-    setIsLoading(true);
-    setTimeout(() => setIsLoading(false), 600);
-  }, []);
+  const questionOptions = useMemo(() => {
+    if (!currentQuestion) return [];
+    return currentQuestion.options.map((opt, idx) => ({
+      label: labelForOrdinal(idx),
+      text: opt.text,
+      isCorrect:
+        lastEvaluation?.correct_option_id === opt.id ||
+        currentQuestion.options.find((o) => o.id === lastEvaluation?.correct_option_id)
+          ? lastEvaluation?.correct_option_id === opt.id
+          : false,
+    }));
+  }, [currentQuestion, lastEvaluation]);
 
-  const handleEndContest = useCallback(() => {
-    setIsLoading(true);
-    setTimeout(() => setIsLoading(false), 800);
-  }, []);
+  const isRevealed =
+    phase !== null &&
+    phase !== "DISPLAY" &&
+    phase !== "ENDED";
+
+  const paused = localPaused || (phase === "INTERVAL" ? false : false);
+
+  const leaderboardEntries = useMemo(
+    () =>
+      leaderboard?.entries.slice(0, 8).map((e) => ({
+        id: e.participant_id,
+        rank: e.rank,
+        name: e.display_name ?? "Participant",
+        initials: (e.display_name ?? "P").slice(0, 2).toUpperCase(),
+        avatarColor: "bg-sky-500",
+        score: e.score,
+        accuracy: 0,
+        time: "-",
+        change: { direction: "same" as const, value: 0 },
+      })) ?? [],
+    [leaderboard]
+  );
+
+  const liveParticipants = leaderboard?.entries.length ?? 0;
+  const eliminatedCount = activity.filter((a) => a.type === "eliminated").length;
+
+  if (!contestId) {
+    return (
+      <div className="p-8">
+        <ModeratorContestPicker targetPath="/moderator/live" actionLabel="Control" />
+      </div>
+    );
+  }
+
+  const showLoading =
+    status === "idle" ||
+    status === "fetching_ticket" ||
+    status === "connecting" ||
+    controlLoading;
 
   return (
     <div className="-m-6 flex h-[calc(100%+3rem)] flex-col bg-slate-950">
       <ModeratorHeader
-        contestName="Annual Tech Trivia 2024"
-        sessionElapsedMs={elapsedMs}
+        contestName={contest?.name ?? "Live Contest"}
+        sessionElapsedMs={sessionElapsedMs}
         onEndContest={handleEndContest}
-        isEnding={isLoading}
+        isEnding={controlLoading}
       />
 
       <main className="grid flex-1 grid-cols-1 gap-4 overflow-hidden p-4 lg:grid-cols-[320px_1fr_360px]">
         {/* Left column */}
         <div className="flex flex-col gap-3 overflow-y-auto pr-1">
-          <LiveStats liveParticipants={8426} eliminated={847} />
-          <TimerPanel totalMs={20 * 1000} remainingMs={remainingMs} />
+          {contestError && (
+            <Alert variant="destructive">
+              <AlertCircle className="size-4" />
+              <AlertDescription>{contestError}</AlertDescription>
+            </Alert>
+          )}
+
+          {error && (
+            <Alert variant="destructive">
+              <AlertCircle className="size-4" />
+              <AlertDescription>{error.message}</AlertDescription>
+            </Alert>
+          )}
+
+          <LiveStats liveParticipants={liveParticipants} eliminated={eliminatedCount} />
+
+          {currentQuestion && phase === "SUBMISSION" ? (
+            <TimerPanel totalMs={questionTotalMs} remainingMs={remainingMs} />
+          ) : null}
+
           <QuestionControl
-            number={12}
-            total={25}
-            text="Which data structure uses LIFO ordering?"
-            options={[
-              { label: "A", text: "Stack", isCorrect: true },
-              { label: "B", text: "Queue" },
-              { label: "C", text: "Heap" },
-              { label: "D", text: "Tree" },
-            ]}
-            revealed={revealed}
+            number={currentQuestion?.sequence ?? 0}
+            total={currentQuestion?.sequence ?? 0}
+            text={currentQuestion?.text ?? "Waiting for question..."}
+            options={questionOptions}
+            revealed={isRevealed}
           />
+
           <ActionToolbar
-            revealed={revealed}
+            revealed={isRevealed}
             paused={paused}
-            isLoading={isLoading}
-            onReveal={handleReveal}
-            onTogglePause={handleTogglePause}
-            onNextQuestion={handleNextQuestion}
-            onTriggerElimination={handleTriggerElimination}
+            isLoading={showLoading}
+            onReveal={phase === null || phase === "DISPLAY" ? handleStart : handleReveal}
+            onTogglePause={() => setLocalPaused((p) => !p)}
+            onNextQuestion={handleAdvance}
+            onTriggerElimination={() => {}}
           />
         </div>
 
         {/* Center column */}
         <div className="min-h-0 overflow-hidden">
-          <LiveLeaderboard entries={mockLeaderboard} />
+          {leaderboardEntries.length > 0 ? (
+            <LiveLeaderboard entries={leaderboardEntries} />
+          ) : (
+            <div className="flex h-full items-center justify-center rounded-xl border border-slate-800 bg-slate-900/80 text-slate-400">
+              {showLoading ? (
+                <Loader2 className="size-8 animate-spin text-[#f05a22]" />
+              ) : (
+                "Leaderboard will appear after the first question."
+              )}
+            </div>
+          )}
         </div>
 
         {/* Right column */}
         <div className="flex min-h-0 flex-col gap-3 overflow-y-auto">
-          <ActivityFeed events={mockActivity} />
+          <ActivityFeed
+            events={
+              activity.length > 0
+                ? activity
+                : [
+                    {
+                      id: "1",
+                      type: "question" as const,
+                      message: "Waiting for live events...",
+                      timestamp: timeLabel(),
+                    },
+                  ]
+            }
+          />
           <ResponseDistribution
-            items={mockDistribution}
-            totalResponses={8428}
+            items={[
+              { label: "A", percentage: 0, count: 0 },
+              { label: "B", percentage: 0, count: 0 },
+              { label: "C", percentage: 0, count: 0 },
+              { label: "D", percentage: 0, count: 0 },
+            ]}
+            totalResponses={0}
           />
         </div>
       </main>
     </div>
   );
+}
+
+function timeLabel(): string {
+  return new Date().toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
 }

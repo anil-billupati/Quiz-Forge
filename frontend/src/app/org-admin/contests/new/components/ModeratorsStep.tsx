@@ -200,14 +200,6 @@ export default function ModeratorsStep({
                 <span className="font-medium">
                   {moderator.first_name} {moderator.last_name}
                 </span>
-                {moderator.isNewlyCreated && (
-                  <Badge
-                    variant="outline"
-                    className="border-emerald-200 text-emerald-700"
-                  >
-                    Invite sent
-                  </Badge>
-                )}
                 <button
                   type="button"
                   onClick={() => removeSelected(moderator.id)}
@@ -286,14 +278,6 @@ export default function ModeratorsStep({
                       >
                         {moderator.status.toLowerCase()}
                       </Badge>
-                      {moderator.isNewlyCreated && (
-                        <Badge
-                          variant="outline"
-                          className="border-emerald-200 bg-emerald-50 text-xs text-emerald-700"
-                        >
-                          Invite sent
-                        </Badge>
-                      )}
                     </div>
                   </div>
                   <div

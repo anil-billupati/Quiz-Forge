@@ -106,3 +106,15 @@ export async function replaceOptions(
     }
   );
 }
+
+export async function bulkImportQuestions(
+  contestId: string,
+  file: File
+): Promise<QuestionResponse[]> {
+  const formData = new FormData();
+  formData.append("file", file);
+  return apiFetch<QuestionResponse[]>(`/contests/${contestId}/questions/bulk`, {
+    method: "POST",
+    body: formData,
+  });
+}

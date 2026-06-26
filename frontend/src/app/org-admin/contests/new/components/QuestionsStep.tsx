@@ -7,9 +7,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import type { QuestionResponse } from "@/lib/api/questions";
 import type { ContestFormState, ContestQuestion } from "../types";
+import QuestionBulkImportDialog from "./QuestionBulkImportDialog";
 
 interface QuestionsStepProps {
+  contestId: string | null;
   structure: ContestFormState["structure"];
   groups: string[];
   questions: ContestQuestion[];
@@ -35,12 +38,23 @@ function newQuestion(): ContestQuestion {
 }
 
 export default function QuestionsStep({
+  contestId,
   structure,
   groups,
   questions,
   onChange,
 }: QuestionsStepProps) {
   const [draft, setDraft] = useState<ContestQuestion | null>(null);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+
+  const mapImportedQuestion = (q: QuestionResponse): ContestQuestion => ({
+    id: q.id,
+    text: q.text,
+    difficulty: "Medium",
+    category: "Imported",
+    group: undefined, // TODO: map group_id to group name when IDs are available in the wizard
+  });
+
 
   const saveDraft = () => {
     if (!draft || !draft.text.trim()) return;
@@ -62,6 +76,7 @@ export default function QuestionsStep({
             variant="outline"
             size="sm"
             className="gap-1.5"
+            onClick={() => setImportDialogOpen(true)}
           >
             <Upload className="size-4" />
             Bulk Import
@@ -229,6 +244,16 @@ export default function QuestionsStep({
           </div>
         )}
       </div>
+
+      <QuestionBulkImportDialog
+        contestId={contestId}
+        open={importDialogOpen}
+        onOpenChange={setImportDialogOpen}
+        onSuccess={(imported) => {
+          onChange([...questions, ...imported.map(mapImportedQuestion)]);
+          setImportDialogOpen(false);
+        }}
+      />
     </div>
   );
 }

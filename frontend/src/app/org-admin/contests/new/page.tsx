@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ChevronLeft, ChevronRight, CheckCircle, Loader2 } from "lucide-react";
@@ -32,15 +32,6 @@ import {
   defaultConfiguration,
 } from "./types";
 
-const steps = [
-  "Contest Info",
-  "Structure",
-  "Configuration",
-  "Moderators",
-  "Questions",
-  "Review & Publish",
-];
-
 function getInitialState(): ContestFormState {
   return {
     info: {
@@ -59,6 +50,16 @@ function getInitialState(): ContestFormState {
     newModeratorIds: [],
     questions: [],
   };
+}
+
+function requiresModeratorControlled(form: ContestFormState): boolean {
+  return (
+    form.config.default.revealMode === "MODERATOR_CONTROLLED" ||
+    (form.structure === "GROUPED" &&
+      Object.values(form.config.byGroup).some(
+        (c) => c.revealMode === "MODERATOR_CONTROLLED"
+      ))
+  );
 }
 
 const wildcardMap: Record<
@@ -116,10 +117,28 @@ export default function CreateContestPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
 
+  const steps = useMemo(() => {
+    const list = ["Contest Info", "Structure", "Configuration"];
+    if (requiresModeratorControlled(form)) {
+      list.push("Moderators");
+    }
+    list.push("Questions", "Review & Publish");
+    return list;
+  }, [form]);
+
+  const currentLabel = steps[step - 1];
+
+  // Keep the current step in bounds when the visible step list changes
+  // (e.g., switching reveal mode from Moderator Controlled to Automatic).
+  useEffect(() => {
+    setStep((s) => Math.min(s, steps.length));
+  }, [steps.length]);
+
   const validateStep = (currentStep: number): boolean => {
+    const label = steps[currentStep - 1];
     const nextErrors: Record<string, string> = {};
 
-    if (currentStep === 1) {
+    if (label === "Contest Info") {
       if (!form.info.name.trim()) {
         nextErrors.name = "Contest name is required";
       }
@@ -138,7 +157,7 @@ export default function CreateContestPage() {
       }
     }
 
-    if (currentStep === 2) {
+    if (label === "Structure") {
       if (form.structure === "GROUPED") {
         if (form.groups.length < 2) {
           nextErrors.groups = "At least two groups are required";
@@ -149,14 +168,8 @@ export default function CreateContestPage() {
       }
     }
 
-    if (currentStep === 4) {
-      const requiresModerator =
-        form.config.default.revealMode === "MODERATOR_CONTROLLED" ||
-        (form.structure === "GROUPED" &&
-          Object.values(form.config.byGroup).some(
-            (c) => c.revealMode === "MODERATOR_CONTROLLED"
-          ));
-      if (requiresModerator && form.moderators.length === 0) {
+    if (label === "Moderators" && requiresModeratorControlled(form)) {
+      if (form.moderators.length === 0) {
         nextErrors.moderators =
           "At least one moderator is required for Moderator Controlled reveal mode.";
       }
@@ -274,22 +287,25 @@ export default function CreateContestPage() {
   const handleNext = async () => {
     setApiError(null);
 
-    if (step === 2) {
+    if (currentLabel === "Structure") {
       const created = await handleCreateContest();
       if (!created) return;
     }
 
-    if (step === 3) {
+    if (currentLabel === "Configuration") {
       const saved = await handleSaveConfiguration();
       if (!saved) return;
     }
 
-    if (step === 4) {
+    if (currentLabel === "Moderators") {
       const assigned = await handleAssignModerators();
       if (!assigned) return;
     }
 
-    if (![2, 3, 4].includes(step) && !validateStep(step)) {
+    if (
+      !["Structure", "Configuration", "Moderators"].includes(currentLabel) &&
+      !validateStep(step)
+    ) {
       return;
     }
 
@@ -307,13 +323,7 @@ export default function CreateContestPage() {
       return;
     }
 
-    const requiresModerator =
-      form.config.default.revealMode === "MODERATOR_CONTROLLED" ||
-      (form.structure === "GROUPED" &&
-        Object.values(form.config.byGroup).some(
-          (c) => c.revealMode === "MODERATOR_CONTROLLED"
-        ));
-    if (requiresModerator && form.moderators.length === 0) {
+    if (requiresModeratorControlled(form) && form.moderators.length === 0) {
       setApiError(
         "At least one moderator is required for Moderator Controlled reveal mode before publishing."
       );
@@ -399,14 +409,14 @@ export default function CreateContestPage() {
 
       {/* Step content */}
       <div className="min-h-100">
-        {step === 1 && (
+        {currentLabel === "Contest Info" && (
           <ContestInfoStep
             data={form.info}
             onChange={updateInfo}
             errors={errors}
           />
         )}
-        {step === 2 && (
+        {currentLabel === "Structure" && (
           <StructureStep
             structure={form.structure}
             groups={form.groups}
@@ -414,7 +424,7 @@ export default function CreateContestPage() {
             errors={errors}
           />
         )}
-        {step === 3 && (
+        {currentLabel === "Configuration" && (
           <ConfigurationStep
             structure={form.structure}
             groups={form.groups}
@@ -423,7 +433,7 @@ export default function CreateContestPage() {
             errors={errors}
           />
         )}
-        {step === 4 && (
+        {currentLabel === "Moderators" && (
           <ModeratorsStep
             revealMode={form.config.default.revealMode}
             selected={form.moderators}
@@ -432,15 +442,18 @@ export default function CreateContestPage() {
             onChange={updateModerators}
           />
         )}
-        {step === 5 && (
+        {currentLabel === "Questions" && (
           <QuestionsStep
+            contestId={contestId}
             structure={form.structure}
             groups={form.groups}
             questions={form.questions}
             onChange={updateQuestions}
           />
         )}
-        {step === 6 && <ReviewStep data={form} contestId={contestId} />}
+        {currentLabel === "Review & Publish" && (
+          <ReviewStep data={form} contestId={contestId} />
+        )}
       </div>
 
       {/* Footer actions */}

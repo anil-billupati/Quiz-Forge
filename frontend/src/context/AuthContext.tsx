@@ -11,6 +11,7 @@ import {
 } from "react";
 import { Roles } from "@/constants";
 import type { AuthUser } from "@/types";
+import { login as apiLogin, logout as apiLogout } from "@/lib/api/auth";
 
 const USER_STORAGE_KEY = "contestforge_user";
 
@@ -18,12 +19,6 @@ interface LoginCredentials {
   email: string;
   password: string;
   rememberMe?: boolean;
-}
-
-interface LoginResponse {
-  access_token: string;
-  expires_in: number;
-  token_type: string;
 }
 
 type AuthContextValue = {
@@ -109,23 +104,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(
     async ({ email, password, rememberMe = false }: LoginCredentials) => {
-      const loginRes = await fetch("/api/auth/login", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password, remember_me: rememberMe }),
+      const loginData = await apiLogin({
+        email,
+        password,
+        remember_me: rememberMe,
       });
-
-      const loginData = (await loginRes.json().catch(() => ({}))) as
-        | LoginResponse
-        | { error?: { message?: string } };
-
-      if (!loginRes.ok) {
-        throw new Error(
-          (loginData as { error?: { message?: string } }).error?.message ??
-            "Sign in failed."
-        );
-      }
 
       const me = await fetchMe();
       if (!me) {
@@ -133,7 +116,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       setUser(me);
-      setToken((loginData as LoginResponse).access_token);
+      setToken(loginData.access_token);
       writeStoredUser(me);
       return me;
     },
@@ -141,12 +124,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const logout = useCallback(async () => {
-    await fetch("/api/auth/logout", {
-      method: "POST",
-      credentials: "include",
-    }).catch(() => {
+    try {
+      await apiLogout();
+    } catch {
       // Best-effort: clear local state regardless.
-    });
+    }
     setToken(null);
     setUser(null);
     clearStoredUser();
