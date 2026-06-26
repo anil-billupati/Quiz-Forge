@@ -12,7 +12,6 @@ import { Roles } from "@/constants";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
 const roleToDashboard: Record<Roles, string> = {
@@ -34,7 +33,6 @@ export default function LoginForm() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [rememberMe, setRememberMe] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -45,7 +43,7 @@ export default function LoginForm() {
     setIsLoading(true);
 
     try {
-      const authUser = await login({ email, password, rememberMe });
+      const authUser = await login({ email, password });
       const callbackUrl = searchParams.get("callbackUrl");
       const dashboard = roleToDashboard[authUser.role];
 
@@ -206,30 +204,6 @@ export default function LoginForm() {
                   )}
                 </button>
               </div>
-            </div>
-
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  id="remember"
-                  checked={rememberMe}
-                  onCheckedChange={(checked) =>
-                    setRememberMe(checked === true)
-                  }
-                />
-                <Label
-                  htmlFor="remember"
-                  className="cursor-pointer text-sm text-slate-700"
-                >
-                  Remember me
-                </Label>
-              </div>
-              <Link
-                href="/forgot-password"
-                className="text-sm font-medium text-[#f05a22] hover:text-[#d94d1a] hover:underline"
-              >
-                Forgot password?
-              </Link>
             </div>
 
             <Button

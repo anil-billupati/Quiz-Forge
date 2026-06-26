@@ -22,6 +22,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   updateOrganization,
   updateOrganizationStatus,
 } from "./actions";
@@ -42,13 +47,20 @@ export default function OrganizationActions({
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" className="size-8">
-          <MoreHorizontal className="size-4" />
-          <span className="sr-only">Open menu</span>
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-40">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon" className="size-8">
+              <MoreHorizontal className="size-4" />
+              <span className="sr-only">Manage {organization.name}</span>
+            </Button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="left">
+          <p>Manage organization</p>
+        </TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent align="end" className="w-44">
         <EditDialog organization={organization} onSuccess={() => router.refresh()} />
         <StatusDialog organization={organization} onSuccess={() => router.refresh()} />
       </DropdownMenuContent>
